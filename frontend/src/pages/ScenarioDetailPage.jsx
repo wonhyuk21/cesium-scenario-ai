@@ -7,4 +7,4 @@ function SimulationDetailPage() {
     )
 }
 
-export default SimulationPage
+export default SimulationDetailPage
