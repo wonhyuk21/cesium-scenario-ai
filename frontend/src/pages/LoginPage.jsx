@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 function LoginPage() {
-    const [id, setId] = useState('')
+    const [username, setUsername] = useState('')
     const [password, setPassword] = useState('')
     const [error, setError] = useState('')
     const navigate = useNavigate()
@@ -15,10 +15,14 @@ function LoginPage() {
             const result = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id, password }),
+                body: JSON.stringify({ username, password }),
             })
-            if(!result.ok) throw new Error('로그인 실패')
-            const data = await res.json()
+            if(!result.ok) {
+                const message = await result.text()
+                throw new Error('로그인 실패')
+            }
+            const authHeader = result.headers.get('Authorization')
+            const token = authHeader.replace('Bearer ', '')
             localStorage.setItem('token', data.token)
             // 로그인 성공시 페이지 이동
             navigate('/simulation')
@@ -31,10 +35,11 @@ function LoginPage() {
         <div className="login-page">
             <h1>Login</h1>
             <form onSubmit={handleSubmit}>
-                <input type="text" placeholder="아이디" value={id} onChange={(e) => setId(e.target.value)}></input>
+                <input type="text" placeholder="아이디" value={username} onChange={(e) => setUsername(e.target.value)}></input>
                 <input type="password" placeholder="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)}></input>
                 {error && <p className="error">{error}</p>}
                 <button type="submit">로그인</button>
+                <button type="button" onClick={() => navigate('/signup')}>회원가입</button>
             </form>
         </div>
     )

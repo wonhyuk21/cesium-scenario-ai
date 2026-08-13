@@ -3,6 +3,7 @@ import LoginPage from './pages/LoginPage'
 import SimulationPage from './pages/SimulationPage'
 import ScenarioListPage from './pages/ScenarioListPage'
 import ScenarioDetailPage from './pages/ScenarioDetailPage'
+import SignUpPage from './pages/SignUpPage'
 
 function App() {
   return (
@@ -11,6 +12,7 @@ function App() {
       <Route path="/simulation" element={<SimulationPage />} />
       <Route path="/scenarios" element={<ScenarioListPage />} />
       <Route path="/scenarios/:id" element={<ScenarioDetailPage />} />
+      <Route path="/signup" element={<SignUpPage />} />
     </Routes>
   )
 }

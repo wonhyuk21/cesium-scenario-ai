@@ -1,4 +1,4 @@
-package com.cesium_scenario_ai.utils;
+package com.cesium_scenario_ai.security;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
