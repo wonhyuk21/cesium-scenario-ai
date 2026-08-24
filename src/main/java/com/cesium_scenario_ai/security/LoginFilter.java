@@ -43,6 +43,8 @@ public class LoginFilter extends UsernamePasswordAuthenticationFilter {
 		String username = credentials.get("username");
 		String password = credentials.get("password");
 		
+		System.out.println("=======username : " + username);
+		System.out.println("=======password : " + password);
 		UsernamePasswordAuthenticationToken authRequest = new UsernamePasswordAuthenticationToken(username, password);
 		
 		// Spring Security가 DB에서 사용자를 조회하고, 비밀번호 해시를 비교해 맞으면 인증완료된 Authentication 반환
@@ -75,7 +77,8 @@ public class LoginFilter extends UsernamePasswordAuthenticationFilter {
      */
     @Override
     protected void unsuccessfulAuthentication(HttpServletRequest req, HttpServletResponse res, AuthenticationException failed) {
-        res.setStatus(HttpServletResponse.SC_UNAUTHORIZED); // 401 Unauthorized 응답
+    	System.out.println("=======로그인 실패 원인: " + failed.getClass().getSimpleName() + " - " + failed.getMessage());
+    	res.setStatus(HttpServletResponse.SC_UNAUTHORIZED); // 401 Unauthorized 응답
         try {
         	res.getWriter().write("아이디 또는 비밀번호가 올바르지 않습니다");
         } catch(IOException e) {

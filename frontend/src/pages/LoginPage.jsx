@@ -23,11 +23,12 @@ function LoginPage() {
             }
             const authHeader = result.headers.get('Authorization')
             const token = authHeader.replace('Bearer ', '')
-            localStorage.setItem('token', data.token)
+            localStorage.setItem('token', token)
             // 로그인 성공시 페이지 이동
             navigate('/simulation')
         } catch (err) {
-            setError('아이디 또는 비밀번호가 올바르지 않습니다.')
+            console.error('로그인 에러:', err)
+            setError(err.message || '아이디 또는 비밀번호가 올바르지 않습니다.')
         }
     }
 

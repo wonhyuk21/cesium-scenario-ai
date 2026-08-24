@@ -1,5 +1,8 @@
 {
   "dependencies": {
     "react-router-dom": "^7.18.2"
+  },
+  "devDependencies": {
+    "vite-plugin-cesium": "^1.2.23"
   }
 }
