@@ -28,12 +28,6 @@ function getSunPosition(date, lat, lon) {
 function calculateShadowPolygon(footprintCoordinates, heightMeters, sunAltitudeDeg, sunAzimuthDeg) {
   // 고도각 0 이하면 그림자 없음 처리
   if(sunAltitudeDeg <= 0) return null
-  /*
-  console.log('outerRing', footprintCoordinates)
-  console.log('건물높이', heightMeters)
-  console.log('고도각', sunAltitudeDeg)
-  console.log('방위각', sunAzimuthDeg)
-  */
 
   // 그림자 길이 = 건물높이 / tan(고도각)
   const shadowLength = heightMeters / Math.tan(Cesium.Math.toRadians(sunAltitudeDeg))
@@ -98,21 +92,21 @@ async function loadWorldBuildings(viewer, bbox, isStillLatest, sunPos) {
             hierarchy: Cesium.Cartesian3.fromDegreesArray(positions),
             extrudedHeight: height,
             height: 0,
-            material: Cesium.Color.LIGHTGRAY.withAlpha(0.9),
+            material: Cesium.Color.LIGHTGRAY.withAlpha(1),
             outline: true,
             outlineColor: Cesium.Color.BLACK,
           },
         })
         // 그림자 계산
-        //const shadowHull = calculateShadowPolygon(outerRing, height, sunPos.altitude, sunPos.azimuth)
-        const testFootprint = [
+        const shadowHull = calculateShadowPolygon(outerRing, height, sunPos.altitude, sunPos.azimuth)
+        /*const testFootprint = [
           [126.908, 37.480],
           [126.9082, 37.480],
           [126.9082, 37.4802],
           [126.908, 37.4802],
           [126.908, 37.480],
-        ]
-        const shadowHull = calculateShadowPolygon(outerRing, 30, sunPos.altitude, sunPos.azimuth)
+        ]*/
+        // const shadowHull = calculateShadowPolygon(outerRing, 30, sunPos.altitude, sunPos.azimuth)
         if(shadowHull === null) return
         shadowHull.geometry.coordinates.forEach((polygon) => {
           const positions = polygon.flatMap(([lon, lat]) => [lon, lat])
@@ -124,7 +118,7 @@ async function loadWorldBuildings(viewer, bbox, isStillLatest, sunPos) {
               extrudedHeight: 0,
               height: 0,
               material: Cesium.Color.BLACK.withAlpha(0.4),
-              outline: true,
+              outline: false,
               outlineColor: Cesium.Color.BLACK,
             },
           })
@@ -139,8 +133,12 @@ async function loadWorldBuildings(viewer, bbox, isStillLatest, sunPos) {
 function App() {
   const [ count, setCount ] = useState(0) 
   const [ user, setUser ] = useState(null)
+  const [ timeOffsetHours, setTimeOffsetHours ] = useState(0)
+  const [ time, setTime ] = useState(new Date())
   const navigate = useNavigate()
   const viewerRef = useRef(null)
+  const cesiumViewerRef = useRef(null)
+  const updateFnRef = useRef(() => {})
 
   useEffect(() => {
   const token = localStorage.getItem('token')
@@ -150,10 +148,32 @@ function App() {
   }
 }, [])
 
+  useEffect(() => {
+    // 1초마다 실행되는 타이머 설정
+    const timer = setInterval(() => {
+      setTime(new Date())
+    }, 1000)
+    
+    // 컴포넌트가 사라질 때 타이머 정리
+    return () => clearInterval(timer)
+  }, [])
+
   const handleLogout = () => {
     localStorage.removeItem('token')
     navigate('/')
   }
+
+  const handleTimeStep = (deltaHours) => {
+    const next = Math.min(9, Math.max(-9, timeOffsetHours + deltaHours))
+    setTimeOffsetHours(next)
+
+    const viewer = cesiumViewerRef.current
+    if(!viewer || viewer.isDestroyed()) return
+
+    const newDate = new Date(Date.now() + next * 60 * 60 * 1000)
+    viewer.clock.currentTime = Cesium.JulianDate.fromDate(newDate)
+    updateFnRef.current()
+}
 
   useEffect(() => {
     // cesium에서 발급받은 토큰
@@ -167,24 +187,23 @@ function App() {
     baseLayerPicker: false,
     navigationHelpButton: true,
     creditContainer: document.createElement("div"),
-    animation: true,
-    timeline: true,
+    animation: false,
+    timeline: false,
     fullscreenButton: true,
   });
+  cesiumViewerRef.current = viewer
 
-  Cesium.createWorldImageryAsync().then((imageryProvider) => {
+  Cesium.createWorldImageryAsync({
+    style: Cesium.IonWorldImageryStyle.ROAD
+  }).then((imageryProvider) => {
     if (viewer.isDestroyed()) return;
     viewer.imageryLayers.addImageryProvider(imageryProvider);
   });
 
-    // 그림자/조명 활성화
-    // viewer.scene.globe.enableLighting = true;
-    // viewer.shadows = true;
-
     // 시각 설정(설정 기준 : 2026.08.17 오후 3시, 한국 UTC+9 기준 6시간 전으로 계산)
-    const targetDate = new Date(2026, 7, 24, 15, 0, 0)
-    viewer.clock.currentTime = Cesium.JulianDate.fromDate(targetDate);
-    //viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date());
+    //const targetDate = new Date(2026, 7, 24, 15, 0, 0)
+    //viewer.clock.currentTime = Cesium.JulianDate.fromDate(targetDate);
+    viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date());
     
     let latestRequestId = 0
     const MAX_HEIGHT_FOR_BUILDINGS = 2000
@@ -217,16 +236,8 @@ function App() {
       latestRequestId += 1
       const requestId = latestRequestId
       loadWorldBuildings(viewer, bbox, () => requestId === latestRequestId, sunPos)
-      const testFootprint = [
-        [126.908, 37.480],
-        [126.9082, 37.480],
-        [126.9082, 37.4802],
-        [126.908, 37.4802],
-        [126.908, 37.480],
-      ]
-      const shadow = calculateShadowPolygon(testFootprint, 30, sunPos.altitude, sunPos.azimuth)
-      console.log('그림자 폴리곤:', shadow)
     } /* updateBuildingsForCurrentView */
+    updateFnRef.current = updateBuildingsForCurrentView
 
     viewer.camera.moveEnd.addEventListener(updateBuildingsForCurrentView)
 
@@ -254,18 +265,27 @@ return (
         <button type="button" onClick={handleLogout}>로그아웃</button>
       </div>
       <div className="sim-header-menu">
-        {/* 
-        <Link to="/scenarios" className="sim-nav-link">시나리오 목록</Link>    
-        */}
         </div>
       <div className="sim-toolbox">
         
       </div>
     </div>
-
+ 
     <div className="sim-main">
-      <div className="sim-toolbar"></div>
-      <div ref={viewerRef} className="sim-viewer" />
+      <div className="sim-viewer-wrapper">
+        <div ref={viewerRef} className="sim-viewer" />
+        <div className="sim-time-control">
+          <span className="sim-time-icon">☀️</span>
+          <button type="button" onClick={() => handleTimeStep(-1)}>−</button>
+          <span className="sim-time-label">
+            {timeOffsetHours > 0 ? `+${timeOffsetHours}` : timeOffsetHours}h
+          </span>
+          <button type="button" onClick={() => handleTimeStep(1)}>+</button>
+        </div>
+      </div>
+      <div className="current-time">
+        <p>🕐현재 시간 : {time.toLocaleString()}</p>
+      </div>
     </div>
 
     <div className="sim-sidebar-right">
