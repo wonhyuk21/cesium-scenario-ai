@@ -135,6 +135,7 @@ function App() {
   const [ user, setUser ] = useState(null)
   const [ timeOffsetHours, setTimeOffsetHours ] = useState(0)
   const [ time, setTime ] = useState(new Date())
+  const [ message, setMessage ] = useState('')
   const navigate = useNavigate()
   const viewerRef = useRef(null)
   const cesiumViewerRef = useRef(null)
@@ -158,11 +159,25 @@ function App() {
     return () => clearInterval(timer)
   }, [])
 
+  // 로그아웃 처리
   const handleLogout = () => {
     localStorage.removeItem('token')
     navigate('/')
   }
 
+  // ai 호출 및 프롬프트 전달
+  const handleCallGemini = async (message) => {
+    console.log('ai 호출', message)
+    const response = await fetch('/api/gemini', { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({message}),
+    
+    })
+    if(!response.ok) return
+  }
+
+  // main 영역 실시간 가져오기
   const handleTimeStep = (deltaHours) => {
     const next = Math.min(9, Math.max(-9, timeOffsetHours + deltaHours))
     setTimeOffsetHours(next)
@@ -290,7 +305,27 @@ return (
 
     <div className="sim-sidebar-right">
       <div className="sim-header-chatbot">
-        <p>ChatBot 영역입니다.</p>
+        <div className="sim-chatbot-container">
+          <span className="chatbot-icon">🤖</span>
+          <h3>ChatBot</h3>
+        </div>
+
+        <div className="chat-messages">
+          <div className="chat-message chat-message-bot">
+            <p>안녕하세요! 무엇을 도와드릴까요?</p>
+          </div>
+          <div className="chat-message chat-message-user">
+            <p>서울역 부근 보여줘</p>
+          </div>
+          <div className="chat-message chat-message-bot">
+            <p>서울역 주변으로 이동했어요.</p>
+          </div>
+        </div>
+
+        <div className="chatbot-input-area">
+          <input type="text" className="chatbot-input" placeholder="메시지를 입력하세요..." value={message} onChange={(e) => setMessage(e.target.value)}/>
+          <button type="button" className="chatbot-send-btn" onClick={() => handleCallGemini(message)}>전송</button>
+        </div>
       </div>
     </div>
   </div>
