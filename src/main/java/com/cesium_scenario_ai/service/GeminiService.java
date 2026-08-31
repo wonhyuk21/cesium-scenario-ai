@@ -1,6 +1,7 @@
 package com.cesium_scenario_ai.service;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -22,12 +23,29 @@ public class GeminiService {
 	public String fetchAsk(String message) {
 		String url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key="
 				+ apiKey;
-		
-		Map<String, Map<String, String>> parseMessage = new HashMap<>();
+		System.out.println("***********geminiService 진입");
+		System.out.println("apiKey 확인: " + apiKey);
+		// gemini의 응답 기본 구조
+		Map<String, Object> body = Map.of(
+				"contents", List.of(
+						Map.of(
+								"parts", List.of(
+										Map.of(
+												"text", message)
+										)
+								)
+						)
+				);
+		System.out.println("******** Map에 잘 담아졌나 확인: " +  body);
+		String parseMessage = objectMapper.writeValueAsString(body);
+		System.out.println("******** 파싱이 잘 됐나 확인: " + parseMessage);
+		// Map<String, Map<String, String>> parseMessage = new HashMap<>();
 		// parseMessage = objectMapper.writeValueAsString(message);
 		
 		String response = restClient.post().uri(url).contentType(MediaType.APPLICATION_JSON)
-				.body(message).retrieve().body(String.class);
+				.body(parseMessage).retrieve().body(String.class);
+		
+		System.out.println("******** restClient를 사용해 요청 잘 보내졌나 확인: " + response);
 		return response;
 	}
 	

@@ -76,7 +76,7 @@ public class SecurityConfig {
 			
 			// 엔드포인트별 접근 권한 설정
 			.authorizeHttpRequests(auth -> auth
-					.requestMatchers("/api/auth/login", "/", "/api/auth/signup").permitAll() // 로그인, 회원가입 누구나 접근 가능
+					.requestMatchers("/api/auth/login", "/", "/api/auth/signup", "/api/gemini").permitAll() // 로그인, 회원가입 누구나 접근 가능
 					.requestMatchers("/admin").hasAuthority("ADMIN") // admin은 ADMIN만 접근 가능
 					.anyRequest().authenticated()) // 그 외 요청은 인증된 사용자만 접근 가능
 			

@@ -136,6 +136,8 @@ function App() {
   const [ timeOffsetHours, setTimeOffsetHours ] = useState(0)
   const [ time, setTime ] = useState(new Date())
   const [ message, setMessage ] = useState('')
+  const [ messages, setMessages ] = useState([])
+  const [ isLoading, setIsLoading ] = useState(false)
   const navigate = useNavigate()
   const viewerRef = useRef(null)
   const cesiumViewerRef = useRef(null)
@@ -165,6 +167,25 @@ function App() {
     navigate('/')
   }
 
+  // 전송버튼 클릭 시 실행
+  const handleSend = async () => {
+    // 기존 메시지에 새 메시지 배열에 추가
+    const newMessages = [...messages, { role: 'user', text: message }]
+    setMessages(newMessages)
+    // 프롬프트에 보냈던 메시지 제거
+    setMessage('')
+
+    // 로딩 표시 켜기
+    setIsLoading(true)
+
+    // AI에게 물어보고 답변 기다리기
+    const answer = await handleCallGemini(message)
+
+    // 로딩 표시 끄고 AI 답변 화면에 추가
+    setIsLoading(false)
+    setMessages([...newMessages, { role: 'bot', text: answer }])
+  }
+
   // ai 호출 및 프롬프트 전달
   const handleCallGemini = async (message) => {
     console.log('ai 호출', message)
@@ -172,9 +193,19 @@ function App() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({message}),
-    
     })
     if(!response.ok) return
+
+    // json으로 변환
+    const data = await response.json()
+
+    // text 뽑아오기
+    const text = data.candidates[0].content.parts[0].text
+
+    console.log('보낸 메시지', message)
+    console.log('응답', text)
+
+    return text
   }
 
   // main 영역 실시간 가져오기
@@ -311,20 +342,17 @@ return (
         </div>
 
         <div className="chat-messages">
-          <div className="chat-message chat-message-bot">
-            <p>안녕하세요! 무엇을 도와드릴까요?</p>
-          </div>
-          <div className="chat-message chat-message-user">
-            <p>서울역 부근 보여줘</p>
-          </div>
-          <div className="chat-message chat-message-bot">
-            <p>서울역 주변으로 이동했어요.</p>
-          </div>
+          {messages.map((msg, i) => (
+            <div key={i} className={`chat-message chat-message-${msg.role}`}>
+              <p>{msg.text}</p>
+            </div>
+          ))}
+          {isLoading && <p>...</p>}
         </div>
 
         <div className="chatbot-input-area">
           <input type="text" className="chatbot-input" placeholder="메시지를 입력하세요..." value={message} onChange={(e) => setMessage(e.target.value)}/>
-          <button type="button" className="chatbot-send-btn" onClick={() => handleCallGemini(message)}>전송</button>
+          <button type="button" className="chatbot-send-btn" onClick={handleSend}>전송</button>
         </div>
       </div>
     </div>
