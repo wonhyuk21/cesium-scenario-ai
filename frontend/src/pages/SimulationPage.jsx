@@ -111,7 +111,7 @@ async function loadWorldBuildings(viewer, bbox, isStillLatest, sunPos) {
         shadowHull.geometry.coordinates.forEach((polygon) => {
           const positions = polygon.flatMap(([lon, lat]) => [lon, lat])
           
-          
+          // 그림자 뷰어에 add
           viewer.entities.add({
             polygon: {
               hierarchy: Cesium.Cartesian3.fromDegreesArray(positions),
