@@ -164,14 +164,28 @@ function App() {
   // 전달받은 메시지를 브이월드 장소 검색 api를 호출
   async function searchLocation(message) {
     console.log('위치 이동 기능')
-    
-    const response = await fetch('https://api.vworld.kr/req/search?key=3705A6B4-85A3-32E0-8568-33C5B3D1ECAB&request=search&query=' + `${message}` + '&type=place', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify
+    const token = localStorage.getItem('token')
+
+    const response = await fetch(`/api/vworld?place=${message}`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
     })
     if(!response.ok) return
-    console.log('vworld 호출 결과', response)
+    const result = await response.json()
+    const xcoord = Number(result.response.result.items[0].point.x)
+    const ycoord = Number(result.response.result.items[0].point.y)
+
+    const listcoord = [ xcoord, ycoord ]
+
+    return listcoord
+  }
+
+  // 위치 이동 기능 선택 시 카메라 좌표 이동
+  const moveCamera = (coords) => {
+    const viewer = cesiumViewerRef.current
+    viewer.camera.flyTo({
+      destination: Cesium.Cartesian3.fromDegrees(coords[0], coords[1], 700),
+    });
   }
 
   // 전송버튼 클릭 시 실행
@@ -186,6 +200,7 @@ function App() {
     if(chatMode === 'awaiting-location') {
       const coords = await searchLocation(sentMessage)
       if(coords) {
+        console.log('브이월드 호출 후 넘어온 좌표 확인', coords)
         moveCamera(coords)
         setMessages([...newMessages, { role: 'bot', text: `${sentMessage}(으)로 이동했어요!`}])
       } else {
@@ -315,11 +330,9 @@ function App() {
 
     viewer.camera.flyTo({
       destination: Cesium.Cartesian3.fromDegrees(126.908, 37.480, 700),
-      // complete: updateBuildingsForCurrentView,
     });
 
     // 지구 표시 관련
-    // viewer.imageryLayers.removeAll();
     viewer.scene.globe.show = true;
 
     return () => {
