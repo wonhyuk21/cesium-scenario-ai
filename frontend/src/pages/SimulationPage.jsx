@@ -99,14 +99,7 @@ async function loadWorldBuildings(viewer, bbox, isStillLatest, sunPos) {
         })
         // 그림자 계산
         const shadowHull = calculateShadowPolygon(outerRing, height, sunPos.altitude, sunPos.azimuth)
-        /*const testFootprint = [
-          [126.908, 37.480],
-          [126.9082, 37.480],
-          [126.9082, 37.4802],
-          [126.908, 37.4802],
-          [126.908, 37.480],
-        ]*/
-        // const shadowHull = calculateShadowPolygon(outerRing, 30, sunPos.altitude, sunPos.azimuth)
+
         if(shadowHull === null) return
         shadowHull.geometry.coordinates.forEach((polygon) => {
           const positions = polygon.flatMap(([lon, lat]) => [lon, lat])
@@ -138,6 +131,7 @@ function App() {
   const [ message, setMessage ] = useState('')
   const [ messages, setMessages ] = useState([])
   const [ isLoading, setIsLoading ] = useState(false)
+  const [ chatMode, setChatMode ] = useState('idle')
   const navigate = useNavigate()
   const viewerRef = useRef(null)
   const cesiumViewerRef = useRef(null)
@@ -166,15 +160,49 @@ function App() {
     localStorage.removeItem('token')
     navigate('/')
   }
+  
+  // 전달받은 메시지를 브이월드 장소 검색 api를 호출
+  async function searchLocation(message) {
+    console.log('위치 이동 기능')
+    
+    const response = await fetch('https://api.vworld.kr/req/search?key=3705A6B4-85A3-32E0-8568-33C5B3D1ECAB&request=search&query=' + `${message}` + '&type=place', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify
+    })
+    if(!response.ok) return
+    console.log('vworld 호출 결과', response)
+  }
 
   // 전송버튼 클릭 시 실행
   const handleSend = async () => {
     // 기존 메시지에 새 메시지 배열에 추가
     const newMessages = [...messages, { role: 'user', text: message }]
     setMessages(newMessages)
-    // 프롬프트에 보냈던 메시지 제거
+    const sentMessage = message // 전송 버튼을 누르고 프롬프트 내용을 지우기 위해 기존 작성한 메시지 값을 안전하게 보관
     setMessage('')
 
+    // 1. 장소, 이름을 기다리는 중이었다면('idle', 'awaiting-location')
+    if(chatMode === 'awaiting-location') {
+      const coords = await searchLocation(sentMessage)
+      if(coords) {
+        moveCamera(coords)
+        setMessages([...newMessages, { role: 'bot', text: `${sentMessage}(으)로 이동했어요!`}])
+      } else {
+        setMessages([...newMessages, { role: 'bot', text: '장소를 찾지 못했어요. 다시 입력해주세요. ex) 당산역, 63빌딩, 명동' }])
+      }
+      setChatMode('idle') // 다시 대기중으로 복귀
+      return
+    }
+
+    // 2. 메뉴 선택 처리
+    if(sentMessage === '1') {
+      setMessages([...newMessages, { role: 'bot', text: '이동하고 싶은 장소를 말씀해주세요. ex) 서울역, 잠실야구장, 진관동' }])
+      setChatMode('awaiting-location')
+      return
+    }
+
+    // 그 외엔 AI 호출
     // 로딩 표시 켜기
     setIsLoading(true)
 
@@ -247,8 +275,6 @@ function App() {
   });
 
     // 시각 설정(설정 기준 : 2026.08.17 오후 3시, 한국 UTC+9 기준 6시간 전으로 계산)
-    //const targetDate = new Date(2026, 7, 24, 15, 0, 0)
-    //viewer.clock.currentTime = Cesium.JulianDate.fromDate(targetDate);
     viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date());
     
     let latestRequestId = 0
@@ -342,6 +368,17 @@ return (
         </div>
 
         <div className="chat-messages">
+          <div className="chat-message chat-message-bot">
+            안녕하세요, 
+            <br></br>
+            Cesium Scenario ChatBot입니다. 
+            <br></br>
+            도움이 필요하신 번호를 '숫자만' 입력해주세요
+            <br></br>
+            1. 위치 이동
+            <br></br>
+            2. 시간 이동
+          </div>
           {messages.map((msg, i) => (
             <div key={i} className={`chat-message chat-message-${msg.role}`}>
               <p>{msg.text}</p>
