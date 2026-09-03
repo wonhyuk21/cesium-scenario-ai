@@ -22,7 +22,8 @@ public class BuildingService {
 	private final ObjectMapper objectMapper = new ObjectMapper();		// JSON 문자열 <-> Java 객체를 변환해주는 도구
 
 	private static final double MIN_BBOX_SIZE = 0.0005; 				// 이보다 작은 조각은 더 안 쪼갬 (안전장치)
-
+	private static final int MAX_TOTAL_FEATURES = 500;
+	
 	public String getBuildingGeoJson(String bbox) throws Exception {	// BuildingController 호출
 		ArrayNode allFeatures = objectMapper.createArrayNode();			// 빈 배열 생성(모든 건물의 집합)
 		fetchRecursive(bbox, allFeatures);								// 재귀 요청, allFeatures를 파라미터로 넘겨줌
@@ -35,6 +36,10 @@ public class BuildingService {
 	}
 
 	private void fetchRecursive(String bbox, ArrayNode allFeatures) throws Exception {
+		if(allFeatures.size() >= MAX_TOTAL_FEATURES) {
+			return;
+		}
+		
 		String url = "https://api.vworld.kr/req/wfs"
 				+ "?SERVICE=WFS"
 				+ "&REQUEST=GetFeature"
@@ -55,6 +60,9 @@ public class BuildingService {
 
 		if (totalFeatures > 1000 && isSplittable(bbox)) {
 			for (String subBbox : splitBboxIntoFour(bbox)) {
+				if(allFeatures.size() >= MAX_TOTAL_FEATURES) {
+					break;
+				}
 				fetchRecursive(subBbox, allFeatures);
 			}
 		} else {
