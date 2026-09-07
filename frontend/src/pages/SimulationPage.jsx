@@ -231,11 +231,38 @@ function App() {
       setChatMode('idle') // 다시 대기중으로 복귀
       return
     }
+    // 1-1. 시간 이동을 기다렸다면('idle', 'awaitiing-time')
+    if(chatMode === 'awaiting-time') {
+      const parsed = await parseTimeOffset(sentMessage) // 숫자로 파싱된 시간(ex. 3 or -3) offset에 저장
+
+      if(isNaN(parsed)) {
+        setMessages([...newMessages, { role: 'bot', text: '시간을 이해하지 못했어요. 다시 입력해주세요. ex) 3시간 뒤, 저녁 6시, -2시간'}])
+        // chatMode 그대로 유지 -> 다시 시간 입력 받음
+      } else if(parsed < -9 || parsed > 9) {
+        setMessages([...newMessages, { role: 'bot', text: '이동 가능한 시간 범위는 -9시간 ~ +9시간까지예요. 다시 입력해주세요.'}])
+      } else {
+        setTimeOffsetHours(parsed)
+        const viewer = cesiumViewerRef.current
+        if(viewer && !viewer.isDestroyed()) {
+          const newDate = new Date(Date.now() + parsed * 60 * 60 * 1000)
+          viewer.clock.currentTime = Cesium.JulianDate.fromDate(newDate)
+          updateFnRef.current()
+        }
+        setMessages([...newMessages, { role: 'bot', text: `${parsed > 0 ? '+' : ''}${parsed}시간으로 이동했어요!`}])
+        setChatMode('idle')   // 성공시에만 메뉴로 복귀
+      }
+      return
+    }
 
     // 2. 메뉴 선택 처리
     if(sentMessage === '1') {
       setMessages([...newMessages, { role: 'bot', text: '이동하고 싶은 장소를 말씀해주세요. ex) 서울역, 잠실야구장, 진관동' }])
       setChatMode('awaiting-location')
+      return
+    }
+    if(sentMessage === '2') {
+      setMessages([...newMessages, { role: 'bot', text: '이동하고 싶은 시간을 말씀해주세요. ex) 3시간 뒤, 저녁 6시, -2시간'}])
+      setChatMode('awaiting-time')
       return
     }
 
@@ -249,6 +276,16 @@ function App() {
     // 로딩 표시 끄고 AI 답변 화면에 추가
     setIsLoading(false)
     setMessages([...newMessages, { role: 'bot', text: answer }])
+  }
+  
+  // 시간 파싱 함수
+  async function parseTimeOffset(message) {
+    const now = new Date()
+    const prompt = `
+    현재 시각은 ${now.toLocaleDateString('ko-KR')}입니다. 사용자가 "${message}"라고 입력했습니다. 이 요청을 현재 시각 기준 몇 시간 뒤/전으로 이동해야 하는지 계산해서, 오직 정수(-9에서 9 사이)만 출력하세요. 다른 설명 없이 숫자만 출력하세요. 예: 3, -2, 0
+    `
+    const answer = await handleCallGemini(prompt)
+    return parseInt(answer, 10)
   }
 
   // ai 호출 및 프롬프트 전달
