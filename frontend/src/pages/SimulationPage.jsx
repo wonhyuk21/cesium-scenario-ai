@@ -136,6 +136,8 @@ function App() {
   const [ chatMode, setChatMode ] = useState('idle')
   const [ zoomLevel, setZoomLevel ] = useState(0)
   const [ tiltDeg, setTiltDeg ] = useState(0)
+  const [ isChatOpen, setIsChatOpen ] = useState(false)
+  const [ isHudOpen, setIsHudOpen ] = useState(false)
   const navigate = useNavigate()
   const viewerRef = useRef(null)
   const cesiumViewerRef = useRef(null)
@@ -446,45 +448,48 @@ function App() {
   }, []);
   
 return (
-  <div className="sim-layout">
-    <div className="sim-sidebar-left">
-      <a href="/simulation" className="sim-logo">Cesium Scenario AI</a>
-      <div className="sim-header-user">
-        {user && <p>{user.username}님</p>}
-        <button type="button" onClick={handleLogout}>로그아웃</button>
+  <div className="dashboard-layout">
+    <div className="dashboard-map">
+      <div ref={viewerRef} className="sim-viewer-full" />
+
+      <div className="sim-time-control">
+        <span className="sim-time-icon">☀️</span>
+        <button type="button" onClick={() => handleTimeStep(-1)}>−</button>
+        <span className="sim-time-label">
+          {timeOffsetHours > 0 ? `+${timeOffsetHours}` : timeOffsetHours}h
+        </span>
+        <button type="button" onClick={() => handleTimeStep(1)}>+</button>
       </div>
-      <div className="sim-header-menu">
-        </div>
-      <div className="sim-toolbox">
-        
+
+      <div className="sim-zoom-control">
+        <button onClick={() => handleZoom('in')}>+</button>
+        <span>{zoomLevel}</span>
+        <button onClick={() => handleZoom('out')}>−</button>
       </div>
-    </div>
- 
-    <div className="sim-main">
-      <div className="sim-viewer-wrapper">
-        <div ref={viewerRef} className="sim-viewer" />
-        <div className="sim-time-control">
-          <span className="sim-time-icon">☀️</span>
-          <button type="button" onClick={() => handleTimeStep(-1)}>−</button>
-          <span className="sim-time-label">
-            {timeOffsetHours > 0 ? `+${timeOffsetHours}` : timeOffsetHours}h
-          </span>
-          <button type="button" onClick={() => handleTimeStep(1)}>+</button>
-        </div>
-        <div className="sim-zoom-control">
-          <button onClick={() => handleZoom('in')}>+</button>
-          <span>{zoomLevel}</span>
-          <button onClick={() => handleZoom('out')}>-</button>
-        </div>
-        <input type="range" min="0" max="30" value={tiltDeg} onChange={(e) => handleTiltChange(Number(e.target.value))} className="sim-tilt-slider" style={{ writingMode: 'vertical-lr', direction: 'rtl' }} />
-      </div>
-      <div className="current-time">
-        <p>🕐현재 시간 : {time.toLocaleString()}</p>
-      </div>
+
+      <input
+        type="range"
+        min="0"
+        max="45"
+        value={tiltDeg}
+        onChange={(e) => handleTiltChange(Number(e.target.value))}
+        className="sim-tilt-slider"
+        style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
+      />
+
+
     </div>
 
-    <div className="sim-sidebar-right">
-      <div className="sim-header-chatbot">
+    <div className="dashboard-side">
+      <div className="dashboard-top">
+        <a href="/simulation" className="sim-logo">Cesium Scenario AI</a>
+        <div className="sim-header-user">
+          {user && <p>{user.username}님</p>}
+          <button type="button" onClick={handleLogout}>로그아웃</button>
+        </div>
+      </div>
+
+      <div className="dashboard-chat">
         <div className="sim-chatbot-container">
           <span className="chatbot-icon">🤖</span>
           <h3>ChatBot</h3>
@@ -492,9 +497,9 @@ return (
 
         <div className="chat-messages">
           <div className="chat-message chat-message-bot">
-            안녕하세요, 
+            안녕하세요,
             <br></br>
-            Cesium Scenario ChatBot입니다. 
+            Cesium Scenario ChatBot입니다.
             <br></br>
             도움이 필요하신 번호를 '숫자만' 입력해주세요
             <br></br>
@@ -515,9 +520,27 @@ return (
           <button type="button" className="chatbot-send-btn" onClick={handleSend}>전송</button>
         </div>
       </div>
-    </div>
-  </div>
 
+      <div className="dashboard-stats">
+        <h3>오늘의 요약</h3>
+        <div className="stat-row">
+          <span>태양 고도</span>
+          <span>-</span>
+        </div>
+        <div className="stat-row">
+          <span>태양 방위</span>
+          <span>-</span>
+        </div>
+        <div className="stat-row">
+          <span>표시 중인 건물 수</span>
+          <span>-</span>
+        </div>
+      </div>
+    </div>
+    <div className="current-time glass-bottom">
+        <p>🕐현재 시간 : {time.toLocaleString()}</p>
+      </div>
+    </div>
 )
 } /* App */
 

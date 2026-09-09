@@ -39,6 +39,7 @@ function SignUpPage() {
             setError(err.message || '회원가입에 실패했습니다. 다시 시도해주세요.')
         }
     }
+    /*
     return (
         <div className="signup-page">
             <h1>Sign Up</h1>
@@ -52,6 +53,25 @@ function SignUpPage() {
             </form>
         </div>
     )
+    */
+   return (
+    <div className="signup-page">
+      <div className="signup-card">
+        <a href="/" className="signup-logo">Cesium Scenario AI</a>
+        <h1>회원가입</h1>
+        <form onSubmit={handleSubmit}>
+          <input type="text" placeholder="아이디" value={username} onChange={(e) => setUsername(e.target.value)} className="signup-input" />
+          <input type="password" placeholder="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} className="signup-input" />
+          <input type="password" placeholder="비밀번호 확인" value={passwordConfirm} onChange={(e) => setPasswordConfirm(e.target.value)} className="signup-input" />
+          {error && <p className="signup-error">{error}</p>}
+          <button type="submit" className="signup-submit-btn">회원가입</button>
+        </form>
+        <p className="signup-switch">
+          이미 계정이 있으신가요? <button type="button" onClick={() => navigate('/')} className="signup-link-btn">로그인으로 돌아가기</button>
+        </p>
+      </div>
+    </div>
+)
 }
 
 export default SignUpPage

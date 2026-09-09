@@ -33,15 +33,20 @@ function LoginPage() {
     }
 
     return (
-        <div className="login-page">
-            <h1>Login</h1>
-            <form onSubmit={handleSubmit}>
-                <input type="text" placeholder="아이디" value={username} onChange={(e) => setUsername(e.target.value)}></input>
-                <input type="password" placeholder="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)}></input>
-                {error && <p className="error">{error}</p>}
-                <button type="submit">로그인</button>
-                <button type="button" onClick={() => navigate('/signup')}>회원가입</button>
-            </form>
+        <div className="auth-page">
+            <div className="auth-card">
+                <a href="/" className="auth-logo">Cesium Scenario AI</a>
+                <h1>로그인</h1>
+                <form onSubmit={handleSubmit}>
+                    <input type="text" placeholder="아이디" value={username} onChange={(e) => setUsername(e.target.value)} className="auth-input" />
+                    <input type="password" placeholder="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} className="auth-input" />
+                    {error && <p className="auth-error">{error}</p>}
+                    <button type="submit" className="auth-submit-btn">로그인</button>
+                </form>
+                <p className="auth-switch">
+                    계정이 없으신가요? <button type="button" onClick={() => navigate('/signup')} className="auth-link-btn">회원가입</button>
+                </p>
+            </div>
         </div>
     )
 }
