@@ -143,6 +143,9 @@ function App() {
   const cesiumViewerRef = useRef(null)
   const updateFnRef = useRef(() => {})
   const zoomFnRef = useRef(() => {})
+  const myLocationMarkerRef = useRef(null)
+  const myLocationDataSourceRef = useRef(null)
+  const routeDataSourceRef = useRef(null)
 
   useEffect(() => {
   const token = localStorage.getItem('token')
@@ -212,6 +215,50 @@ function App() {
     });
   }
 
+  // gps버튼 클릭 시 현재 위치로 이동
+  const handleGoToMyLocation = () => {
+    if(!navigator.geolocation) {
+      alert('이 브라우저는 위치 정보를 지원하지 않습니다.')
+      return
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { longitude, latitude } = position.coords // 성공시 넘어오는 객체 안에 coords
+        moveCamera([longitude, latitude])
+
+        const viewer = cesiumViewerRef.current
+        if(viewer && !viewer.isDestroyed()) {
+          const dataSource = myLocationDataSourceRef.current
+
+          // 기존에 찍어둔 핀이 있으면 제거
+          if(myLocationMarkerRef.current) {
+            dataSource.entities.remove(myLocationMarkerRef.current)
+          }
+
+          const pinBuilder = new Cesium.PinBuilder()
+          const pinImage = pinBuilder.fromColor(Cesium.Color.fromCssColorString('#aa3bff'), 48).toDataURL()
+          
+          myLocationMarkerRef.current = dataSource.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(longitude, latitude),
+            billboard: {
+              image: pinImage,
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+            zIndex: 9999,
+          })
+        }
+      },
+      (error) => {
+        console.error(error)
+        alert('위치 정보를 가져오지 못했어요. 브라우저 위치 권한을 허용했는지 확인해주세요.')
+      },
+      { enableHighAccuracy: true, timeout: 5000 }
+    )
+  } /* handleGoToMyLocation */
+
   // 전송버튼 클릭 시 실행
   const handleSend = async () => {
     // 기존 메시지에 새 메시지 배열에 추가
@@ -220,7 +267,7 @@ function App() {
     const sentMessage = message // 전송 버튼을 누르고 프롬프트 내용을 지우기 위해 기존 작성한 메시지 값을 안전하게 보관
     setMessage('')
 
-    // 1. 장소, 이름을 기다리는 중이었다면('idle', 'awaiting-location')
+    // 1-1. 장소, 이름을 기다리는 중이었다면('idle', 'awaiting-location')
     if(chatMode === 'awaiting-location') {
       const coords = await searchLocation(sentMessage)
       if(coords) {
@@ -233,7 +280,7 @@ function App() {
       setChatMode('idle') // 다시 대기중으로 복귀
       return
     }
-    // 1-1. 시간 이동을 기다렸다면('idle', 'awaitiing-time')
+    // 1-2. 시간 이동을 기다렸다면('idle', 'awaitiing-time')
     if(chatMode === 'awaiting-time') {
       const parsed = await parseTimeOffset(sentMessage) // 숫자로 파싱된 시간(ex. 3 or -3) offset에 저장
 
@@ -255,6 +302,19 @@ function App() {
       }
       return
     }
+    // 1-3. 길찾기를 선택했다면('idle', 'awaiting-route')
+    if(chatMode === 'awaiting-route') {
+      const parsed = await parsePlaceWord(sentMessage)
+      if(parsed) {
+        const result = await callToFindRoute(parsed)
+        setMessages([...newMessages, { role: 'bot', text: '길찾기를 완료했어요'}])
+        setChatMode('idle')
+        // 길 찾은 후, 찾은 경로의 중간 위치로 카메라 이동
+      } else {
+        setMessages([...newMessages, { role: 'bot', text: '출발지나 도착지의 정보를 찾을 수 없어요, 주요 역 및 주요 지명으로 입력 후 다시 검색해주세요.'}])
+      }
+      return
+    }
 
     // 2. 메뉴 선택 처리
     if(sentMessage === '1') {
@@ -265,6 +325,11 @@ function App() {
     if(sentMessage === '2') {
       setMessages([...newMessages, { role: 'bot', text: '이동하고 싶은 시간을 말씀해주세요. ex) 3시간 뒤, 저녁 6시, -2시간'}])
       setChatMode('awaiting-time')
+      return
+    }
+    if(sentMessage === '3') {
+      setMessages([...newMessages, { role: 'bot', text: '출발지와 도착지를 순서대로 입력해주세요. ex) 당산역, 영등포구청역 or 외대앞역, 신도림역'}])
+      setChatMode('awaiting-route')
       return
     }
 
@@ -284,10 +349,130 @@ function App() {
   async function parseTimeOffset(message) {
     const now = new Date()
     const prompt = `
-    현재 시각은 ${now.toLocaleDateString('ko-KR')}입니다. 사용자가 "${message}"라고 입력했습니다. 이 요청을 현재 시각 기준 몇 시간 뒤/전으로 이동해야 하는지 계산해서, 오직 정수(-9에서 9 사이)만 출력하세요. 다른 설명 없이 숫자만 출력하세요. 예: 3, -2, 0
+      현재 시각은 ${now.toLocaleDateString('ko-KR')}입니다. 사용자가 "${message}"라고 입력했습니다. 이 요청을 현재 시각 기준 몇 시간 뒤/전으로 이동해야 하는지 계산해서, 오직 정수(-9에서 9 사이)만 출력하세요. 다른 설명 없이 숫자만 출력하세요. 예: 3, -2, 0
     `
     const answer = await handleCallGemini(prompt)
     return parseInt(answer, 10)
+  }
+
+  // 장소 추출 함수
+  async function parsePlaceWord(message) {
+    const prompt = `
+      사용자가 "${message}"라고 입력했습니다. 이 문장에서 출발지와 도착지 지명만 JSON으로 추출하세요. 
+      다른 설명이나 마크다운 코드블록 없이 JSON 객체만 출력하세요. 예: {"start":"당산역", "end":"영등포구청역"}
+    `
+    const answer = await handleCallGemini(prompt)
+
+    // JSON 형식으로 받기 위해 ``` 코드블록으로 감싸져 오면 제거
+    const cleaned = answer.replace(/```json:```/g, '').trim()
+
+    try {
+      const parsed = JSON.parse(cleaned)
+      if(!parsed.start || !parsed.end) return null
+      return parsed
+    } catch(e) {
+      console.error('장소 파싱 실패:', e, answer)
+      return null
+    }
+  }
+
+  // T맵 길찾기 api 호출
+  async function callToFindRoute(parsed) {
+
+    const token = localStorage.getItem('token')
+
+    const startCoords= await searchLocation(parsed.start)
+    const endCoords = await searchLocation(parsed.end)
+
+    if(!startCoords || !endCoords) return null
+    
+    const response = await fetch('/api/tmap', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}` 
+      },
+      body: JSON.stringify({
+        startX: startCoords[0],
+        startY: startCoords[1],
+        endX: endCoords[0],
+        endY: endCoords[1],
+        startName: parsed.start,
+        endName: parsed.end,
+      })
+    })
+    if(!response.ok) return
+    const data = await response.json()
+    drawToLineString(data, startCoords, endCoords)
+  }
+  // 라인 그리기
+  function drawToLineString(data, startCoords, endCoords) {
+    console.log('draw로 넘어옴', data)
+    const viewer = cesiumViewerRef.current
+    if(!viewer || viewer.isDestroyed()) return
+
+    const routeCoords = []
+
+    for(const feature of data.features) {
+      if(feature.geometry.type === 'LineString') {
+        for(const coord of feature.geometry.coordinates) {
+          // 결과값 순회 후 LineString인 것들의 좌표만 배열에 push
+          routeCoords.push(coord)
+        }
+      }
+    }
+    // cesium fromDegreesArray()가 받을수 있는 1차원 배열 구조로 변경(flatMap)
+    const flatPositions = routeCoords.flatMap(([lon, lat]) => [lon, lat])
+    
+    const dataSource = routeDataSourceRef.current
+
+    // 이전에 그려둔 경로선이 있으면 제거
+    dataSource.entities.removeAll()
+    // viewer에 경로선 추가
+    dataSource.entities.add({
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArray(flatPositions),
+        width: 5,
+        material: Cesium.Color.RED,
+        clampToGround: true,
+      }
+    })
+
+    const pinBuilder = new Cesium.PinBuilder()
+
+    // 출발 마커 (초록)
+    const startPinImage = pinBuilder.fromColor(Cesium.Color.fromCssColorString('#22c55e'), 48).toDataURL()
+    dataSource.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(startCoords[0], startCoords[1]),
+      billboard: {
+        image: startPinImage,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    })
+
+    // 도착 마커 (파랑)
+    const endPinImage = pinBuilder.fromColor(Cesium.Color.fromCssColorString('#3b82f6'), 48).toDataURL()
+    dataSource.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(endCoords[0], endCoords[1]),
+      billboard: {
+        image: endPinImage,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    })
+
+    // 출발지와 도착지 사이의 중간거리를 turf로 계산해 경로 탐색 완료 시 카메라 이동
+    const midPoint = turf.midpoint(
+      turf.point(startCoords),
+      turf.point(endCoords)
+    )
+
+    const [ midLon, midLat ] = midPoint.geometry.coordinates
+
+    moveCamera([ midLon, midLat ])
   }
 
   // ai 호출 및 프롬프트 전달
@@ -312,7 +497,7 @@ function App() {
     return text
   }
 
-  // main 영역 실시간 가져오기
+  // 현재시각 가져와서 화면에 출력
   const handleTimeStep = (deltaHours) => {
     const next = Math.min(9, Math.max(-9, timeOffsetHours + deltaHours))
     setTimeOffsetHours(next)
@@ -341,17 +526,26 @@ function App() {
 
       viewer = new Cesium.Viewer(viewerRef.current, {
         terrainProvider: terrainProvider,
-        geocoder: true,
-        homeButton: true,
+        geocoder: false,
+        homeButton: false,
         sceneModePicker: false,
         baseLayerPicker: false,
-        navigationHelpButton: true,
+        navigationHelpButton: false,
         creditContainer: document.createElement("div"),
         animation: false,
         timeline: false,
         fullscreenButton: true,
       });
       cesiumViewerRef.current = viewer
+      // gps핀 전용 CustomDataSource
+      const myLocationDataSource = new Cesium.CustomDataSource('myLocation')
+      viewer.dataSources.add(myLocationDataSource)
+      myLocationDataSourceRef.current = myLocationDataSource
+
+      // 경로선 전용 CustomDataSource
+      const routeDataSource = new Cesium.CustomDataSource('route')
+      viewer.dataSources.add(routeDataSource)
+      routeDataSourceRef.current = routeDataSource
 
       viewer.scene.screenSpaceCameraController.enableTilt = false   // 여기 추가: 마우스로 각도 못 눕히게 막음
 
@@ -452,21 +646,51 @@ return (
     <div className="dashboard-map">
       <div ref={viewerRef} className="sim-viewer-full" />
 
-      <div className="sim-time-control">
-        <span className="sim-time-icon">☀️</span>
-        <button type="button" onClick={() => handleTimeStep(-1)}>−</button>
-        <span className="sim-time-label">
+      <div className="absolute top-4 left-4 z-10 flex items-center gap-1 rounded-full border border-gray-200 bg-white/90 backdrop-blur-md py-1.5 pl-3 pr-1.5 shadow-lg">
+        <span className="mr-1 text-base">☀️</span>
+        <button
+          type="button"
+          onClick={() => handleTimeStep(-1)}
+          className="flex h-7 w-7 items-center justify-center rounded-full text-[#aa3bff] hover:bg-[#f3eefc] transition"
+        >
+          −
+        </button>
+        <span className="min-w-9 text-center text-sm font-semibold text-gray-800">
           {timeOffsetHours > 0 ? `+${timeOffsetHours}` : timeOffsetHours}h
         </span>
-        <button type="button" onClick={() => handleTimeStep(1)}>+</button>
+        <button
+          type="button"
+          onClick={() => handleTimeStep(1)}
+          className="flex h-7 w-7 items-center justify-center rounded-full text-[#aa3bff] hover:bg-[#f3eefc] transition"
+        >
+          +
+        </button>
       </div>
 
-      <div className="sim-zoom-control">
-        <button onClick={() => handleZoom('in')}>+</button>
-        <span>{zoomLevel}</span>
-        <button onClick={() => handleZoom('out')}>−</button>
-      </div>
-
+      <div className="absolute top-4 right-4 z-10 flex flex-col items-center gap-1 rounded-2xl border border-gray-200 bg-white/90 backdrop-blur-md p-1.5 shadow-lg">
+        <button
+          onClick={() => handleZoom('in')}
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#aa3bff] text-white hover:bg-[#8f2fe0] transition"
+        >
+          +
+        </button>
+        <span className="py-1 text-sm font-semibold text-gray-700">{zoomLevel}</span>
+        <button
+          onClick={() => handleZoom('out')}
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#aa3bff] text-white hover:bg-[#8f2fe0] transition"
+        >
+          −
+        </button>
+      </div>    
+      <button type="button" className="sim-gps-control" onClick={handleGoToMyLocation} title="내 위치로 이동">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="3" fill="currentColor" />
+          <path d="M12 2V6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path d="M12 18V22" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path d="M2 12H6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+          <path d="M18 12H22" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      </button>
       <input
         type="range"
         min="0"
@@ -506,10 +730,17 @@ return (
             1. 위치 이동
             <br></br>
             2. 시간 이동
+            <br></br>
+            3. 도보 길찾기
           </div>
           {messages.map((msg, i) => (
             <div key={i} className={`chat-message chat-message-${msg.role}`}>
               <p>{msg.text}</p>
+              {msg.role === 'bot' && (
+                <span className="block text-[11px] text-gray-400 mt-1">
+                  {new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
             </div>
           ))}
           {isLoading && <p>...</p>}
@@ -522,18 +753,34 @@ return (
       </div>
 
       <div className="dashboard-stats">
-        <h3>오늘의 요약</h3>
-        <div className="stat-row">
-          <span>태양 고도</span>
-          <span>-</span>
-        </div>
-        <div className="stat-row">
-          <span>태양 방위</span>
-          <span>-</span>
-        </div>
-        <div className="stat-row">
-          <span>표시 중인 건물 수</span>
-          <span>-</span>
+        <h3 className="text-center text-sm font-bold text-[#aa3bff] mb-4 tracking-wide">
+          오늘의 요약
+        </h3>
+
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between rounded-xl border border-[#f0eef5] bg-white px-4 py-3 shadow-sm hover:shadow-md hover:border-[#e4d4fb] transition">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f3eefc] text-[#aa3bff]">☀️</span>
+              <span className="text-sm text-[#4a4550]">태양 고도</span>
+            </div>
+            <span className="text-sm font-semibold text-[#08060d]">-</span>
+          </div>
+
+          <div className="flex items-center justify-between rounded-xl border border-[#f0eef5] bg-white px-4 py-3 shadow-sm hover:shadow-md hover:border-[#e4d4fb] transition">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f3eefc] text-[#aa3bff]">🧭</span>
+              <span className="text-sm text-[#4a4550]">태양 방위</span>
+            </div>
+            <span className="text-sm font-semibold text-[#08060d]">-</span>
+          </div>
+
+          <div className="flex items-center justify-between rounded-xl border border-[#f0eef5] bg-white px-4 py-3 shadow-sm hover:shadow-md hover:border-[#e4d4fb] transition">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f3eefc] text-[#aa3bff]">🏢</span>
+              <span className="text-sm text-[#4a4550]">표시 중인 건물 수</span>
+            </div>
+            <span className="text-sm font-semibold text-[#08060d]">-</span>
+          </div>
         </div>
       </div>
     </div>

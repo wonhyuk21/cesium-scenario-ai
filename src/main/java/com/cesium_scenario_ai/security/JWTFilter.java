@@ -65,6 +65,7 @@ public class JWTFilter extends OncePerRequestFilter {
 		} catch(Exception e) {
 			log.error("JWT필터 처리 중 오류 발생: {}", e.getMessage(), e);
 			response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "유효하지 않은 토큰입니다.");
+			return;
 		}
 
 		filterChain.doFilter(request, response);
