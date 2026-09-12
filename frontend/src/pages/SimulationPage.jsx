@@ -5,13 +5,17 @@ import 'cesium/Build/Cesium/Widgets/widgets.css'
 import * as SunCalc from 'suncalc'
 import * as turf from '@turf/turf'
 import '../App.css'
+import haloIcon from '../assets/halo.svg'
+import dotIcon from '../assets/blue-dot.svg'
 
+/* 18 ~ 132 라인 삭제 예정 */
 function parseJwt(token) {
   const base64Payload = token.split('.')[1]
   const decoded = atob(base64Payload.replace(/-/g, '+').replace(/_/g, '/'))
   return JSON.parse(decoded)
 }
 
+// cesium.sunlight가 viewer의 현재 시각을 가져와 실제 태양 방향 계산, 삭제 예정
 // 태양의 방위각(azimuth), 고도각(altitude)을 도(degree) 단위로 계산
 function getSunPosition(date, lat, lon) {
   console.log('입력값: ', {date, lat, lon})
@@ -24,6 +28,7 @@ function getSunPosition(date, lat, lon) {
   }
 } /* getSunPosition */
 
+// 위와 마찬가지로 삭제 예정
 // 건물 외곽선과 높이, 태양 위치를 받아 그림자 폴리곤 계산
 function calculateShadowPolygon(footprintCoordinates, heightMeters, sunAltitudeDeg, sunAzimuthDeg) {
   // 고도각 0 이하면 그림자 없음 처리
@@ -51,6 +56,7 @@ function calculateShadowPolygon(footprintCoordinates, heightMeters, sunAltitudeD
   return shadowHull
 } /* calculateShadowPolygon */
 
+// 3d tiles로 구현, 삭제 예정
 // 브이월드 wfs 요청
 async function loadWorldBuildings(viewer, bbox, isStillLatest, sunPos) {
   const token = localStorage.getItem('token')
@@ -145,6 +151,7 @@ function App() {
   const zoomFnRef = useRef(() => {})
   const myLocationMarkerRef = useRef(null)
   const myLocationDataSourceRef = useRef(null)
+  const myLocationHaloRef = useRef(null)
   const routeDataSourceRef = useRef(null)
 
   useEffect(() => {
@@ -176,9 +183,22 @@ function App() {
     const viewer = cesiumViewerRef.current
     if(!viewer || viewer.isDestroyed()) return
     const pitch = -(90 - value)   // value=0 → -90(2D), value=60 → -30(3D)
-    viewer.camera.setView({
-      orientation: { heading: viewer.camera.heading, pitch: Cesium.Math.toRadians(pitch), roll: 0 },
-    })
+
+    // 화면 중앙이 가리키는 지면 좌표를 고정 축(target)으로 사용
+    const target = viewer.camera.pickEllipsoid(
+      new Cesium.Cartesian2(viewer.canvas.clientWidth / 2, viewer.canvas.clientHeight /2),
+      viewer.scene.globe.ellipsoid
+    )
+    if(!target) return
+
+    const range = Cesium.Cartesian3.distance(viewer.camera.positionWC, target)
+
+    viewer.camera.lookAt(
+      target,
+      new Cesium.HeadingPitchRange(viewer.camera.heading, Cesium.Math.toRadians(pitch), range)
+    )
+    // lookAt이 카메라를 그 기준툴에 잠금, 그래서 풀어주기
+    viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
   }
 
   // 전달받은 메시지를 브이월드 장소 검색 api를 호출
@@ -199,6 +219,7 @@ function App() {
 
     return listcoord
   }
+
   // 줌인 줌아웃 버튼 핸들러
   const handleZoom = (direction) => {
     const viewer = cesiumViewerRef.current
@@ -215,6 +236,41 @@ function App() {
     });
   }
 
+  function placeMyLocationMarker(dataSource, longitude, latitude) {
+    // 기존 마커/halo 제거
+    if(myLocationMarkerRef.current) dataSource.entities.remove(myLocationMarkerRef.current)
+    if(myLocationHaloRef.current) dataSource.entities.remove(myLocationMarkerRef.current)
+
+    // halo
+    myLocationHaloRef.current = dataSource.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(longitude, latitude),
+      billboard: {
+        image: haloIcon,
+        scale: new Cesium.CallbackProperty(() => {
+          const t = (Date.now() % 2000) / 2000
+          return 0.5 + t * 1.5
+        }, false),
+        color: new Cesium.CallbackProperty(() => {
+          const t = (Date.now() % 2000) / 2000
+          return Cesium.Color.WHITE.withAlpha(1 - t)
+        }, false),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    })
+
+    // 중앙파란점
+    myLocationMarkerRef.current = dataSource.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(longitude, latitude),
+      billboard: {
+        image: dotIcon,
+        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      zIndex: 9999,
+    })
+  }
   // gps버튼 클릭 시 현재 위치로 이동
   const handleGoToMyLocation = () => {
     if(!navigator.geolocation) {
@@ -236,19 +292,10 @@ function App() {
             dataSource.entities.remove(myLocationMarkerRef.current)
           }
 
-          const pinBuilder = new Cesium.PinBuilder()
-          const pinImage = pinBuilder.fromColor(Cesium.Color.fromCssColorString('#aa3bff'), 48).toDataURL()
+          //const pinBuilder = new Cesium.PinBuilder()
+          //const pinImage = pinBuilder.fromColor(Cesium.Color.fromCssColorString('#aa3bff'), 48).toDataURL()
           
-          myLocationMarkerRef.current = dataSource.entities.add({
-            position: Cesium.Cartesian3.fromDegrees(longitude, latitude),
-            billboard: {
-              image: pinImage,
-              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
-              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-              disableDepthTestDistance: Number.POSITIVE_INFINITY,
-            },
-            zIndex: 9999,
-          })
+          placeMyLocationMarker(dataSource, longitude, latitude)
         }
       },
       (error) => {
@@ -518,7 +565,6 @@ function App() {
     let cancelled = false
 
     async function initViewer() {
-      //const terrainProvider = await Cesium.createWorldTerrainAsync()
       const terrainProvider = new Cesium.EllipsoidTerrainProvider()
       console.log('terrainProvider:', terrainProvider)
       
@@ -537,6 +583,22 @@ function App() {
         fullscreenButton: true,
       });
       cesiumViewerRef.current = viewer
+
+      // 실시간 그림자 설정
+      viewer.shadows = true                         // 그림자 기능 켜기
+      viewer.scene.globe.enableLighting = true      // 지면이 태양 방향에 따라 밝기를 다르게
+      viewer.shadowMap.maximumDistance = 2000       // 어느 거리까지 그림자를 계산할지
+      viewer.shadowMap.size = 4096                  // 해상도
+      viewer.shadowMap.softShadows = true           // 경계를 부드럽게
+      viewer.shadowMap.darkness = 0.3               // 어둡기
+
+      // 서울시 건물 3D Tiles 로드
+      Cesium.Cesium3DTileset.fromUrl('/tiles/tileset.json').then((tileset) => {
+        if (viewer.isDestroyed()) return
+        tileset.shadows = Cesium.ShadowMode.ENABLED
+        viewer.scene.primitives.add(tileset)
+      })
+
       // gps핀 전용 CustomDataSource
       const myLocationDataSource = new Cesium.CustomDataSource('myLocation')
       viewer.dataSources.add(myLocationDataSource)
@@ -559,10 +621,9 @@ function App() {
       // 시각 설정(설정 기준 : 2026.08.17 오후 3시, 한국 UTC+9 기준 6시간 전으로 계산)
       viewer.clock.currentTime = Cesium.JulianDate.fromDate(new Date());
       
-      let latestRequestId = 0
       const MAX_HEIGHT_FOR_BUILDINGS = 2000
 
-      function updateBuildingsForCurrentView() {
+      function updateBuildingsForCurrentView() {  /* 3d tiles로 구현, 삭제 예정 */
         if(viewer.isDestroyed()) return
         
         const currentDate = Cesium.JulianDate.toDate(viewer.clock.currentTime)
@@ -587,7 +648,7 @@ function App() {
         const north = Cesium.Math.toDegrees(rectangle.north)
 
         // 추가: 화면에 보이는 영역이 너무 넓으면(각도를 눕혔을 때) 건물 로딩 자체를 생략
-        const MAX_VIEW_SPAN_DEGREES = 0.03   // 위도 1도 ≈ 111km이므로 대략 3km 폭 정도 제한
+        const MAX_VIEW_SPAN_DEGREES = 0.9  // 위도 1도 ≈ 111km이므로 대략 3km 폭 정도 제한
         const lonSpan = east - west
         const latSpan = north - south
 
@@ -595,12 +656,7 @@ function App() {
           viewer.entities.removeAll()
           return
         }
-        const bbox = `${west},${south},${east},${north}`
-
-        latestRequestId += 1
-        const requestId = latestRequestId
-        loadWorldBuildings(viewer, bbox, () => requestId === latestRequestId, sunPos)
-        } /* updateBuildingsForCurrentView */
+      } /* updateBuildingsForCurrentView */
         updateFnRef.current = updateBuildingsForCurrentView
 
         viewer.camera.moveEnd.addEventListener(updateBuildingsForCurrentView)
@@ -611,22 +667,48 @@ function App() {
           setZoomLevel(zoom)
         }
 
+        // 현재 위치에 따라 동적으로 이동시키기
+        function flyToInitialLocation() { 
+          const defaultView = () => {
+            viewer.camera.flyTo({
+              destination: Cesium.Cartesian3.fromDegrees(126.908, 37.480, 700),
+              orientation: { heading: Cesium.Math.toRadians(0), pitch: Cesium.Math.toRadians(-90), roll: 0 }
+            })
+          }
+
+          if(!navigator.geolocation) {
+            defaultView()   // geolocation 미지원 브라우저는 기본 위치로
+            return
+          }
+
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              if(viewer.isDestroyed()) return
+              const { longitude, latitude } = position.coords
+              viewer.camera.flyTo({
+                destination: Cesium.Cartesian3.fromDegrees(longitude, latitude, 700),
+                orientation: { heading: Cesium.Math.toRadians(0), pitch: Cesium.Math.toRadians(-90), roll: 0 },
+              })
+
+              //const viewer = cesiumViewerRef.current
+                const dataSource = myLocationDataSourceRef.current
+                placeMyLocationMarker(dataSource, longitude, latitude)
+
+            },
+            (error) => {
+              console.warn('현재 위치를 가져오지 못했습니다.', error)
+              if(!viewer.isDestroyed()) defaultView()   // 권한 거부/실패 시 기본 위치로
+            }
+          )
+        } /* flyToInitialLocation() */
+
         zoomFnRef.current = updateZoomLevel
         viewer.camera.percentageChanged = 0.1
         viewer.camera.changed.addEventListener(updateZoomLevel)
         updateZoomLevel()
-
-        viewer.camera.flyTo({
-          destination: Cesium.Cartesian3.fromDegrees(126.908, 37.480, 700),
-          orientation: {
-            heading: Cesium.Math.toRadians(0),
-            pitch: Cesium.Math.toRadians(-45),   // 45도 정도 내려다보는 각도로 고정
-            roll: 0
-          }
-        });
-
-        // 지구 표시 관련
-        // viewer.scene.globe.show = true;
+        
+        // 현재 위치에 따라 동적으로 이동시키기
+        flyToInitialLocation()
     }
 
     initViewer()
@@ -698,7 +780,7 @@ return (
         value={tiltDeg}
         onChange={(e) => handleTiltChange(Number(e.target.value))}
         className="sim-tilt-slider"
-        style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
+        style={{ writingMode: 'vertical-lr' }}
       />
 
 

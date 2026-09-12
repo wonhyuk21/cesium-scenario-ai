@@ -17,8 +17,8 @@ public class BuildingController {
 	private final BuildingService buildingService;
 	
 	@GetMapping("/api/buildings")
-	public ResponseEntity<String> getBuildings(@RequestParam String bbox) throws Exception {
-		String geoJson = buildingService.getBuildingGeoJson(bbox);
+	public ResponseEntity<String> getBuildings(@RequestParam String bbox, @RequestParam(defaultValue = "500") int maxFeatures) throws Exception {
+		String geoJson = buildingService.getBuildingGeoJson(bbox, maxFeatures);
 		return ResponseEntity.ok().contentType(MediaType.APPLICATION_JSON).body(geoJson);
 	}
 }
