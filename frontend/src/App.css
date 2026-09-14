@@ -414,8 +414,9 @@
   border-radius: 4px;
   font-size: 14px;
   text-align: left;
-    border-radius: 12px;
+  border-radius: 12px;
   box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+  white-space: pre-line;
 }
 
 .chat-message p {
@@ -500,7 +501,7 @@
 
 .sim-tilt-slider {
   position: absolute;
-  top: 220px;
+  top: 296px;
   right: 42px;
   transform: translateX(50%);
   z-index: 10;
@@ -1252,4 +1253,42 @@
 
 .sim-gps-control:hover {
   background: #f3eefc;
+}
+
+.sim-map-style-control {
+  position: absolute;
+  top: 208px;
+  right: 22px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 40px;
+  background: #ffffff;
+  border: 1px solid #e5e4e7;
+  border-radius: 12px;
+  padding: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.sim-map-style-control button {
+  width: 100%;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.sim-map-style-control button:hover {
+  background: #f3eefc;
+}
+
+.sim-map-style-control button.active {
+  background: #aa3bff;
+  color: #ffffff;
 }

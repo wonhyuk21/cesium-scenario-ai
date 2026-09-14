@@ -7,6 +7,8 @@ import * as turf from '@turf/turf'
 import '../App.css'
 import haloIcon from '../assets/halo.svg'
 import dotIcon from '../assets/blue-dot.svg'
+import startPinIcon from '../assets/start-pin.svg'
+import endPinIcon from '../assets/end-pin.svg'
 
 /* 18 ~ 132 라인 삭제 예정 */
 function parseJwt(token) {
@@ -144,6 +146,7 @@ function App() {
   const [ tiltDeg, setTiltDeg ] = useState(0)
   const [ isChatOpen, setIsChatOpen ] = useState(false)
   const [ isHudOpen, setIsHudOpen ] = useState(false)
+  const [ mapStyle, setMapStyle ] = useState('road')
   const navigate = useNavigate()
   const viewerRef = useRef(null)
   const cesiumViewerRef = useRef(null)
@@ -153,6 +156,7 @@ function App() {
   const myLocationDataSourceRef = useRef(null)
   const myLocationHaloRef = useRef(null)
   const routeDataSourceRef = useRef(null)
+  const imageryLayerRef = useRef(null)
 
   useEffect(() => {
   const token = localStorage.getItem('token')
@@ -210,14 +214,18 @@ function App() {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
     })
-    if(!response.ok) return
     const result = await response.json()
-    const xcoord = Number(result.response.result.items[0].point.x)
-    const ycoord = Number(result.response.result.items[0].point.y)
+    const items = result?.response?.result?.items
 
-    const listcoord = [ xcoord, ycoord ]
+    if(!items || items.length === 0) {
+      return null
+    }
+      const xcoord = Number(result.response.result.items[0].point.x)
+      const ycoord = Number(result.response.result.items[0].point.y)
 
-    return listcoord
+      const listcoord = [ xcoord, ycoord ]
+
+      return listcoord
   }
 
   // 줌인 줌아웃 버튼 핸들러
@@ -271,6 +279,28 @@ function App() {
       zIndex: 9999,
     })
   }
+
+  // 버튼 클릭시 basemap을 변경하는 핸들러
+  const handleChangeMapStyle = async (style) => {
+    const viewer = cesiumViewerRef.current
+    if(!viewer || viewer.isDestroyed()) return
+    if(mapStyle === style) return       // 이미 같은 스타일이면 아무것도 안함
+
+    const cesiumStyle = style === 'road' ? Cesium.IonWorldImageryStyle.ROAD : Cesium.IonWorldImageryStyle.AERIAL
+
+    const newProvider = await Cesium.createWorldImageryAsync({ style: cesiumStyle })
+    if(viewer.isDestroyed()) return
+
+    // 기존 지도 레이어 제거
+    if(imageryLayerRef.current) {
+      viewer.imageryLayers.remove(imageryLayerRef.current)
+    }
+
+    // 새 지도 레이어 추가하고 참조 갱신
+    imageryLayerRef.current = viewer.imageryLayers.addImageryProvider(newProvider)
+    setMapStyle(style)
+  } /* handleChangeMapStyle */
+
   // gps버튼 클릭 시 현재 위치로 이동
   const handleGoToMyLocation = () => {
     if(!navigator.geolocation) {
@@ -291,10 +321,7 @@ function App() {
           if(myLocationMarkerRef.current) {
             dataSource.entities.remove(myLocationMarkerRef.current)
           }
-
-          //const pinBuilder = new Cesium.PinBuilder()
-          //const pinImage = pinBuilder.fromColor(Cesium.Color.fromCssColorString('#aa3bff'), 48).toDataURL()
-          
+         
           placeMyLocationMarker(dataSource, longitude, latitude)
         }
       },
@@ -320,11 +347,11 @@ function App() {
       if(coords) {
         console.log('브이월드 호출 후 넘어온 좌표 확인', coords)
         moveCamera(coords)
-        setMessages([...newMessages, { role: 'bot', text: `${sentMessage}(으)로 이동했어요!`}])
+        setMessages([...newMessages, { role: 'bot', text: `${sentMessage}(으)로 이동했어요! \n원하시는 메뉴를 '번호'로 선택하시거나 자유롭게 대화해주세요.\n1. 위치 이동\n2. 시간 이동\n3. 도보 길찾기`}])
+        setChatMode('idle') // 다시 대기중으로 복귀
       } else {
         setMessages([...newMessages, { role: 'bot', text: '장소를 찾지 못했어요. 다시 입력해주세요. ex) 당산역, 63빌딩, 명동' }])
       }
-      setChatMode('idle') // 다시 대기중으로 복귀
       return
     }
     // 1-2. 시간 이동을 기다렸다면('idle', 'awaitiing-time')
@@ -344,7 +371,7 @@ function App() {
           viewer.clock.currentTime = Cesium.JulianDate.fromDate(newDate)
           updateFnRef.current()
         }
-        setMessages([...newMessages, { role: 'bot', text: `${parsed > 0 ? '+' : ''}${parsed}시간으로 이동했어요!`}])
+        setMessages([...newMessages, { role: 'bot', text: `${parsed > 0 ? '+' : ''}${parsed}시간으로 이동했어요! \n원하시는 메뉴를 '번호'로 선택하시거나 자유롭게 대화해주세요.\n1. 위치 이동\n2. 시간 이동\n3. 도보 길찾기`}])
         setChatMode('idle')   // 성공시에만 메뉴로 복귀
       }
       return
@@ -354,7 +381,7 @@ function App() {
       const parsed = await parsePlaceWord(sentMessage)
       if(parsed) {
         const result = await callToFindRoute(parsed)
-        setMessages([...newMessages, { role: 'bot', text: '길찾기를 완료했어요'}])
+        setMessages([...newMessages, { role: 'bot', text: '길찾기를 완료했어요\n원하시는 메뉴를 `번호`로 선택하시거나 자유롭게 대화해주세요.\n1. 위치 이동\n2. 시간 이동\n3. 도보 길찾기' }])
         setChatMode('idle')
         // 길 찾은 후, 찾은 경로의 중간 위치로 카메라 이동
       } else {
@@ -488,29 +515,79 @@ function App() {
     const pinBuilder = new Cesium.PinBuilder()
 
     // 출발 마커 (초록)
-    const startPinImage = pinBuilder.fromColor(Cesium.Color.fromCssColorString('#22c55e'), 48).toDataURL()
     dataSource.entities.add({
       position: Cesium.Cartesian3.fromDegrees(startCoords[0], startCoords[1]),
       billboard: {
-        image: startPinImage,
+        image: startPinIcon,
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: '출발',
+        font: 'bold 14px sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        showBackground: true,
+        backgroundColor: Cesium.Color.fromCssColorString('#22c55e'),
+        backgroundPadding: new Cesium.Cartesian2(8, 4),
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -56),
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     })
 
     // 도착 마커 (파랑)
-    const endPinImage = pinBuilder.fromColor(Cesium.Color.fromCssColorString('#3b82f6'), 48).toDataURL()
     dataSource.entities.add({
       position: Cesium.Cartesian3.fromDegrees(endCoords[0], endCoords[1]),
       billboard: {
-        image: endPinImage,
+        image: endPinIcon,
         verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
+      label: {
+        text: '도착',
+        font: 'bold 14px sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        showBackground: true,
+        backgroundColor: Cesium.Color.fromCssColorString('#3b82f6'),
+        backgroundPadding: new Cesium.Cartesian2(8, 4),
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        pixelOffset: new Cesium.Cartesian2(0, -56),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },    
     })
 
+    // 경로 전체가 화면에 다 들어오도록 카메라 범위 계산
+    const lons = routeCoords.map(([lon]) => lon)
+    const lats = routeCoords.map(([, lat]) => lat)
+
+    // 경로의 동서남북
+    const east = Math.max(...lons)
+    const west = Math.min(...lons)
+    const south = Math.min(...lats)
+    const north = Math.max(...lats)
+
+    const lonPadding = (east - west) * 0.1
+    const latPadding = (north - south) * 0.1
+    const routeRectangle = Cesium.Rectangle.fromDegrees(
+      west - lonPadding,
+      south - latPadding,
+      east + lonPadding,
+      north + latPadding
+    )
+
+    viewer.camera.flyTo({
+      destination: routeRectangle,
+      orientation: {
+        heading: Cesium.Math.toRadians(0),
+        pitch: Cesium.Math.toRadians(-90),   // 경로 전체를 위에서 평면으로 내려다보기
+        roll: 0,
+      },  
+    })
+    /*
     // 출발지와 도착지 사이의 중간거리를 turf로 계산해 경로 탐색 완료 시 카메라 이동
     const midPoint = turf.midpoint(
       turf.point(startCoords),
@@ -520,6 +597,7 @@ function App() {
     const [ midLon, midLat ] = midPoint.geometry.coordinates
 
     moveCamera([ midLon, midLat ])
+    */
   }
 
   // ai 호출 및 프롬프트 전달
@@ -616,6 +694,7 @@ function App() {
       }).then((imageryProvider) => {
         if (viewer.isDestroyed()) return;
         viewer.imageryLayers.addImageryProvider(imageryProvider);
+        imageryLayerRef.current = viewer.imageryLayers.addImageryProvider(imageryProvider);
       });
 
       // 시각 설정(설정 기준 : 2026.08.17 오후 3시, 한국 UTC+9 기준 6시간 전으로 계산)
@@ -773,6 +852,12 @@ return (
           <path d="M18 12H22" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         </svg>
       </button>
+
+      <div className="sim-map-style-control">
+        <button type="button" className={mapStyle === 'road' ? 'active' : ''} onClick={() => handleChangeMapStyle('road')}>일반</button>
+        <button type="button" className={mapStyle === 'aerial' ? 'active' : ''} onClick={() => handleChangeMapStyle('aerial')}>위성</button>
+      </div>
+
       <input
         type="range"
         min="0"
