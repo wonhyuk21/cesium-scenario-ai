@@ -5,6 +5,7 @@ import 'cesium/Build/Cesium/Widgets/widgets.css'
 import * as SunCalc from 'suncalc'
 import * as turf from '@turf/turf'
 import '../App.css'
+import { checkAndResetHistoryFlag } from '../navigationFlag.js'
 import haloIcon from '../assets/halo.svg'
 import dotIcon from '../assets/blue-dot.svg'
 import startPinIcon from '../assets/start-pin.svg'
@@ -17,124 +18,73 @@ function parseJwt(token) {
   return JSON.parse(decoded)
 }
 
-// cesium.sunlight가 viewer의 현재 시각을 가져와 실제 태양 방향 계산, 삭제 예정
-// 태양의 방위각(azimuth), 고도각(altitude)을 도(degree) 단위로 계산
+// 태양의 고도/방위각을 도(degree) 단위로 계산 (방위각은 나침반 기준: 0=북, 시계방향)
 function getSunPosition(date, lat, lon) {
-  console.log('입력값: ', {date, lat, lon})
   const sunPos = SunCalc.getPosition(date, lat, lon)
-  console.log('getSunPosition에서 altitude', sunPos.altitude)
-  console.log('getSunPosition에서 azimuth', sunPos.azimuth)
   return {
     altitude: sunPos.altitude,
     azimuth: sunPos.azimuth,
   }
 } /* getSunPosition */
 
-// 위와 마찬가지로 삭제 예정
 // 건물 외곽선과 높이, 태양 위치를 받아 그림자 폴리곤 계산
 function calculateShadowPolygon(footprintCoordinates, heightMeters, sunAltitudeDeg, sunAzimuthDeg) {
-  // 고도각 0 이하면 그림자 없음 처리
-  if(sunAltitudeDeg <= 0) return null
+  if(sunAltitudeDeg <= 0) return null   // 해가 지평선 아래면 그림자 없음
 
-  // 그림자 길이 = 건물높이 / tan(고도각)
-  const shadowLength = heightMeters / Math.tan(Cesium.Math.toRadians(sunAltitudeDeg))
-  // 그림자 방향 = 방위각 + 180"
-  const shadowDirection = (sunAzimuthDeg + 180) % 360
-  
-  // 건물 외곽선의 각 점을 그림자 방향으로 이동
+  const shadowLength = heightMeters / Math.tan(Cesium.Math.toRadians(sunAltitudeDeg)) // 높이 / tan(고도각) = 그림자길이
+  const shadowDirection = (sunAzimuthDeg + 180) % 360                                 // 그림자방향
+
+  // 외곽선과 그림자 방향으로 그림자 길이만큼 밀어낸 새 좌표 구함
   const projectedCoords = footprintCoordinates.map(([lon, lat]) => {
-    // lon, lat을 기준으로 shadowLength, shadowDirection만큼 떨어진 좌표를 계산
     const projected = turf.destination([lon, lat], shadowLength, shadowDirection, { units: 'meters' })
     return projected.geometry.coordinates
   })
 
-  // 원래 외곽선 점 + 이동된 점을 합쳐서 볼록 껍질(그림자 전체 모양) 계산
-  const allPoints = turf.featureCollection(   // 여러개의 점을 하나로 묶음으로 만듬
+  // 건물의 모든 꼭짓점, 그림자 방향으로 길이만큼 밀어낸 좌표들을 펼쳐 turf가 이해하는 point로 변환
+  const allPoints = turf.featureCollection(
     [...footprintCoordinates, ...projectedCoords].map((coord) => turf.point(coord))
   )
-  // 입력된 점을 모두 감싸는 볼록 껍질 폴리곤 계산
-  const shadowHull = turf.convex(allPoints)
-
-  return shadowHull
+  // 흩어진 점들을 모두 감싸는 convex hull 폴리곤 생성
+  return turf.convex(allPoints)
 } /* calculateShadowPolygon */
 
-// 3d tiles로 구현, 삭제 예정
-// 브이월드 wfs 요청
-async function loadWorldBuildings(viewer, bbox, isStillLatest, sunPos) {
-  const token = localStorage.getItem('token')
-
-  try {
-    const response = await fetch(`/api/buildings?bbox=${bbox}`, {
-      headers: { Authorization: `Bearer ${token}`},
-    })
-
-    if(!response.ok) {
-      console.error('건물데이터 요청 실패:', response.status)
-      return
-    }
-
-    const geoJson = await response.json()
-    console.log('geoJson', geoJson)
-
-    // strictMode에서 반환된 함수에 대한 뷰어A를 제거
-    // strictMode가 개발 중 마운트 > 언마운트 > 재마운트 시 이전 뷰어 파괴에도 그 뷰어의 fetch의 응답을 막기 위해 사용
-    if(viewer.isDestroyed()) return
-    // 최신 요청이 더 나갔다면 이 응답은 버림(moveEnd에 대한 fetch)
-    if(!isStillLatest()) return
-
-    // 이전 화면 범위의 건물들 지우고 새로 그림(카메라가 이동했기 때문)
-    viewer.entities.removeAll()
-
-    // 건물 높이 계산
-    geoJson.features.forEach((feature) => {
-      const floors = feature.properties.gro_flo_co ?? 1   // 층수가 없으면 기본 1층
-      const height = floors * 3                           // 건물 층고를 기본 3m 가정
-
-      // 멀티폴리곤의 첫번째 외곽선 계산
-      feature.geometry.coordinates.forEach((polygon) => {
-        const outerRing = polygon[0]
-        const positions = outerRing.flatMap(([lon, lat]) => [lon, lat])
-
-        viewer.entities.add({
-          polygon: {
-            hierarchy: Cesium.Cartesian3.fromDegreesArray(positions),
-            extrudedHeight: height,
-            height: 0,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,              // DEM적용 시 바닥을 실제 지면에 붙임
-            extrudedHeightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,   // 지형 표면 기준으로 위로 EXTRUDEDHEIGHT 만큼
-            material: Cesium.Color.GRAY.withAlpha(1),
-            outline: true,
-            outlineColor: Cesium.Color.BLACK,
-          },
-        })
-        // 그림자 계산
-        const shadowHull = calculateShadowPolygon(outerRing, height, sunPos.altitude, sunPos.azimuth)
-
-        if(shadowHull === null) return
-        shadowHull.geometry.coordinates.forEach((polygon) => {
-          const positions = polygon.flatMap(([lon, lat]) => [lon, lat])
-          
-          // 그림자 뷰어에 add
-          viewer.entities.add({
-            polygon: {
-              hierarchy: Cesium.Cartesian3.fromDegreesArray(positions),
-              extrudedHeight: 0,
-              height: 0,
-              material: Cesium.Color.BLACK.withAlpha(0.9),
-              outline: false,
-              outlineColor: Cesium.Color.BLACK,
-            },
-          })
-        })
-      })
-    })
-  } catch (error) {
-    console.error('브이월드 건물 로드 실패:', error)
+// 경로 라인을 따라 일정 간격으로 샘플 지점을 뽑음 (그늘 판정용)
+function sampleRoutePoints(routeCoords, count = 30) {
+  if(routeCoords.length < 2) {
+    return routeCoords
   }
-} /* loadWorldBuildings */
+  const line = turf.lineString(routeCoords)
+  const totalLength = turf.length(line, { units: 'meters' })
+
+  const points = []
+  for(let i = 0; i <= count; i++) {
+    const distance = (totalLength * i) / count
+    const pointOnLine = turf.along(line, distance, { units: 'meters' })
+    points.push(pointOnLine.geometry.coordinates)
+  }
+  return points
+} /* sampleroutePoints */
+
+// 경로 샘플 지점 중 몇 %가 건물 그림자 안에 있는지 계산
+function computeShadeRatio(samplePoints, buildings, sunAltitudeDeg, sunAzimuthDeg) {
+  if(sunAltitudeDeg <= 0) return 100   // 해가 없으면(야간) 전체를 그늘로 취급
+
+  const shadowHulls = buildings
+    // 건물 목록을 하나씩 돌며 각 건물 외곽선 및 높이를 가지고 그림자 계산 함수 호출
+    .map((b) => calculateShadowPolygon(b.outerRing, b.height, sunAltitudeDeg, sunAzimuthDeg))
+    // 실제 계산된 결과에 따라 실제 그림자인것들만 남김
+    .filter((hull) => hull !== null)
+
+  const shadedCount = samplePoints.filter((coord) => {
+    const pt = turf.point(coord)
+    return shadowHulls.some((hull) => turf.booleanPointInPolygon(pt, hull)) // 이 점이 그늘 안에 있는지를 반환
+  }).length
+
+  // 그늘인 점 갯수 / 전체 샘플 점 갯수 계산해서 %로 변환
+  return Math.round((shadedCount / samplePoints.length) * 100)    
+} /* computeShadeRatio */
 
 function App() {
-  const [ count, setCount ] = useState(0) 
   const [ user, setUser ] = useState(null)
   const [ timeOffsetHours, setTimeOffsetHours ] = useState(0)
   const [ time, setTime ] = useState(new Date())
@@ -144,14 +94,15 @@ function App() {
   const [ chatMode, setChatMode ] = useState('idle')
   const [ zoomLevel, setZoomLevel ] = useState(0)
   const [ tiltDeg, setTiltDeg ] = useState(0)
-  const [ isChatOpen, setIsChatOpen ] = useState(false)
-  const [ isHudOpen, setIsHudOpen ] = useState(false)
   const [ mapStyle, setMapStyle ] = useState('road')
+  const [ headingDeg, setHeadingDeg ] = useState(0)
+  const [ routeSummary, setRouteSummary ] = useState(null)   // 경로 그늘 요약(오늘의 요약 패널용)
   const navigate = useNavigate()
   const viewerRef = useRef(null)
   const cesiumViewerRef = useRef(null)
   const updateFnRef = useRef(() => {})
   const zoomFnRef = useRef(() => {})
+  const routeContextRef = useRef(null)   // 현재 경로의 샘플지점/건물 캐시(시간 바뀔 때마다 다시 안 받아오게)
   const myLocationMarkerRef = useRef(null)
   const myLocationDataSourceRef = useRef(null)
   const myLocationHaloRef = useRef(null)
@@ -159,12 +110,22 @@ function App() {
   const imageryLayerRef = useRef(null)
 
   useEffect(() => {
-  const token = localStorage.getItem('token')
-  if(token) {
-    const payload = parseJwt(token)
-    setUser({ username: payload.username, role: payload.role })
-  }
-}, [])
+    // 브라우저의 앞.뒤로 가기 눌렀을 때 차단
+    if(checkAndResetHistoryFlag()) {
+      alert('잘못된 접근입니다. 다시 로그인해주세요.')
+      localStorage.removeItem('token')
+      navigate('/')
+      return
+    } 
+    const token = localStorage.getItem('token')
+    // 토큰이 이미 삭제된 경우 차단(로그아웃 및 브라우저 뒤로가기 눌렀다가 재접근 시)
+    if(!token) {
+      navigate('/')
+      return
+    }
+      const payload = parseJwt(token)
+      setUser({ username: payload.username, role: payload.role })
+  }, [])
 
   useEffect(() => {
     // 1초마다 실행되는 타이머 설정
@@ -182,6 +143,32 @@ function App() {
     navigate('/')
   }
   
+  // 실제로 카메라에 heading(회전각)을 적용하는 공통 함수
+  const applyHeading = (value) => {
+    const viewer = cesiumViewerRef.current
+    if(!viewer || viewer.isDestroyed()) return
+
+    const target = viewer.camera.pickEllipsoid(
+      new Cesium.Cartesian2(viewer.canvas.clientWidth / 2, viewer.canvas.clientHeight / 2),
+      viewer.scene.globe.ellipsoid
+    )
+    if(!target) return
+
+    const range = Cesium.Cartesian3.distance(viewer.camera.positionWC, target)
+
+    viewer.camera.lookAt(
+      target,
+      new Cesium.HeadingPitchRange(Cesium.Math.toRadians(value), viewer.camera.pitch, range)
+    )
+    viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY)
+
+    setHeadingDeg(value)
+  }
+
+  const handleHeadingChange = (value) => {
+    applyHeading(value)
+  }
+
   const handleTiltChange = (value) => {
     setTiltDeg(value)
     const viewer = cesiumViewerRef.current
@@ -341,6 +328,14 @@ function App() {
     const sentMessage = message // 전송 버튼을 누르고 프롬프트 내용을 지우기 위해 기존 작성한 메시지 값을 안전하게 보관
     setMessage('')
 
+    // 0. awaiting-* 모드 중 취소/메뉴 복귀 요청 처리
+    const CANCEL_KEYWORDS = ['메뉴', '취소', '0']
+    if(chatMode !== 'idle' && CANCEL_KEYWORDS.includes(sentMessage.trim())) {
+      setMessages([...newMessages, { role: 'bot', text: '메인 메뉴로 돌아왔어요.\n원하시는 메뉴를 \'번호\'로 선택해주세요.\n1. 위치 이동\n2. 시간 이동\n3. 도보 길찾기'}])
+      setChatMode('idle')
+      return
+    }
+
     // 1-1. 장소, 이름을 기다리는 중이었다면('idle', 'awaiting-location')
     if(chatMode === 'awaiting-location') {
       const coords = await searchLocation(sentMessage)
@@ -349,6 +344,14 @@ function App() {
         moveCamera(coords)
         setMessages([...newMessages, { role: 'bot', text: `${sentMessage}(으)로 이동했어요! \n원하시는 메뉴를 '번호'로 선택하시거나 자유롭게 대화해주세요.\n1. 위치 이동\n2. 시간 이동\n3. 도보 길찾기`}])
         setChatMode('idle') // 다시 대기중으로 복귀
+
+        // 이동한 장소에 대한 소개를 Gemini에게 물어봐서 뒤이어 보여줌
+        setIsLoading(true)
+        const info = await getPlaceInfo(sentMessage)
+        setIsLoading(false)
+        if(info) {
+          setMessages((prev) => [...prev, { role: 'bot', text: info }])
+        }
       } else {
         setMessages([...newMessages, { role: 'bot', text: '장소를 찾지 못했어요. 다시 입력해주세요. ex) 당산역, 63빌딩, 명동' }])
       }
@@ -362,7 +365,7 @@ function App() {
         setMessages([...newMessages, { role: 'bot', text: '시간을 이해하지 못했어요. 다시 입력해주세요. ex) 3시간 뒤, 저녁 6시, -2시간'}])
         // chatMode 그대로 유지 -> 다시 시간 입력 받음
       } else if(parsed < -9 || parsed > 9) {
-        setMessages([...newMessages, { role: 'bot', text: '이동 가능한 시간 범위는 -9시간 ~ +9시간까지예요. 다시 입력해주세요.'}])
+        setMessages([...newMessages, { role: 'bot', text: `${parsed}시간은 이동 가능 범위(-9~9시간)를 벗어나요. 다시 입력해주세요.`}])
       } else {
         setTimeOffsetHours(parsed)
         const viewer = cesiumViewerRef.current
@@ -370,6 +373,7 @@ function App() {
           const newDate = new Date(Date.now() + parsed * 60 * 60 * 1000)
           viewer.clock.currentTime = Cesium.JulianDate.fromDate(newDate)
           updateFnRef.current()
+          updateRouteShadeForCurrentTime()
         }
         setMessages([...newMessages, { role: 'bot', text: `${parsed > 0 ? '+' : ''}${parsed}시간으로 이동했어요! \n원하시는 메뉴를 '번호'로 선택하시거나 자유롭게 대화해주세요.\n1. 위치 이동\n2. 시간 이동\n3. 도보 길찾기`}])
         setChatMode('idle')   // 성공시에만 메뉴로 복귀
@@ -381,7 +385,12 @@ function App() {
       const parsed = await parsePlaceWord(sentMessage)
       if(parsed) {
         const result = await callToFindRoute(parsed)
-        setMessages([...newMessages, { role: 'bot', text: '길찾기를 완료했어요\n원하시는 메뉴를 `번호`로 선택하시거나 자유롭게 대화해주세요.\n1. 위치 이동\n2. 시간 이동\n3. 도보 길찾기' }])
+        if(result === null) {
+          setMessages([...newMessages, { role: 'bot', text: '출발지나 도착지를 찾지 못했어요. 다시 입력해주세요. ex) 당산역에서 영등포구청역까지 길 찾아줘'}])
+          // chatMode를 'awaiting-route'로 유지해서 다시 입력받게끔 return
+          return
+        }
+        setMessages([...newMessages, { role: 'bot', text: '길찾기를 완료했어요\n아래 길찾기 요약을 통해 길찾기 결과를 확인할 수 있어요\n좌측 상단에 시간 조절을 통해 경로상 실시간 그늘 비율을 확인할 수 있어요\n원하시는 메뉴를 `번호`로 선택하시거나 자유롭게 대화해주세요.\n1. 위치 이동\n2. 시간 이동\n3. 도보 길찾기' }])
         setChatMode('idle')
         // 길 찾은 후, 찾은 경로의 중간 위치로 카메라 이동
       } else {
@@ -392,17 +401,17 @@ function App() {
 
     // 2. 메뉴 선택 처리
     if(sentMessage === '1') {
-      setMessages([...newMessages, { role: 'bot', text: '이동하고 싶은 장소를 말씀해주세요. ex) 서울역, 잠실야구장, 진관동' }])
+      setMessages([...newMessages, { role: 'bot', text: '이동하고 싶은 장소를 말씀해주세요. ex) 서울역, 잠실야구장, 진관동\n(취소하려면 "메뉴"라고 입력하세요)' }])
       setChatMode('awaiting-location')
       return
     }
     if(sentMessage === '2') {
-      setMessages([...newMessages, { role: 'bot', text: '이동하고 싶은 시간을 말씀해주세요. ex) 3시간 뒤, 저녁 6시, -2시간'}])
+      setMessages([...newMessages, { role: 'bot', text: '이동하고 싶은 시간을 말씀해주세요. ex) 3시간 뒤, 저녁 6시, -2시간\n(취소하려면 "메뉴"라고 입력하세요)'}])
       setChatMode('awaiting-time')
       return
     }
     if(sentMessage === '3') {
-      setMessages([...newMessages, { role: 'bot', text: '출발지와 도착지를 순서대로 입력해주세요. ex) 당산역, 영등포구청역 or 외대앞역, 신도림역'}])
+      setMessages([...newMessages, { role: 'bot', text: '출발지와 도착지를 순서대로 입력해주세요. ex) 당산역, 영등포구청역 or 외대앞역, 신도림역\n(취소하려면 "메뉴"라고 입력하세요)'}])
       setChatMode('awaiting-route')
       return
     }
@@ -418,13 +427,26 @@ function App() {
     setIsLoading(false)
     setMessages([...newMessages, { role: 'bot', text: answer }])
   }
-  
+
+  // 이동한 장소에 대한 간단한 소개를 Gemini에게 요청
+  async function getPlaceInfo(placeName) {
+    const prompt = `
+      "${placeName}"에 대해 여행객에게 소개하듯 2~3문장으로 간단히 설명해줘.
+      위치나 특징, 유명한 이유를 포함해서. 다른 설명이나 인사말 없이 소개 내용만 출력해줘.
+    `
+    const info = await handleCallGemini(prompt)
+    return info
+  }
+
   // 시간 파싱 함수
   async function parseTimeOffset(message) {
     const now = new Date()
     const prompt = `
-      현재 시각은 ${now.toLocaleDateString('ko-KR')}입니다. 사용자가 "${message}"라고 입력했습니다. 이 요청을 현재 시각 기준 몇 시간 뒤/전으로 이동해야 하는지 계산해서, 오직 정수(-9에서 9 사이)만 출력하세요. 다른 설명 없이 숫자만 출력하세요. 예: 3, -2, 0
-    `
+      현재 시각은 ${now.toLocaleDateString('ko-KR')}입니다. 사용자가 "${message}"라고 입력했습니다.
+      이 요청이 현재 시각 기준 몇 시간 뒤(양수)인지 몇 시간 전(음수)인지 정확히 계산하세요.
+      범위 제한 없이, 계산된 값을 있는 그대로 정수로만 출력하세요.
+      다른 설명 없이 숫자만 출력하세요. 예: 3, -2, 0, 99, -200
+      `
     const answer = await handleCallGemini(prompt)
     return parseInt(answer, 10)
   }
@@ -477,14 +499,16 @@ function App() {
     })
     if(!response.ok) return
     const data = await response.json()
-    drawToLineString(data, startCoords, endCoords)
+    // T맵 API 호출 후 data를 받아 길찾기 시작 좌표, 길찾기 끝 좌표, 출발지명, 도착지명을 넘김 
+    drawToLineString(data, startCoords, endCoords, parsed.start, parsed.end)
   }
   // 라인 그리기
-  function drawToLineString(data, startCoords, endCoords) {
+  function drawToLineString(data, startCoords, endCoords, startName, endName) {
     console.log('draw로 넘어옴', data)
     const viewer = cesiumViewerRef.current
     if(!viewer || viewer.isDestroyed()) return
 
+    // 경로 좌표 추출 모음(data.features에서 LineString좌표만 추출)
     const routeCoords = []
 
     for(const feature of data.features) {
@@ -497,7 +521,17 @@ function App() {
     }
     // cesium fromDegreesArray()가 받을수 있는 1차원 배열 구조로 변경(flatMap)
     const flatPositions = routeCoords.flatMap(([lon, lat]) => [lon, lat])
-    
+
+    // 경로 총 거리(m)/소요시간(초)은 T맵 응답 첫 feature의 properties에 들어있음
+    const summaryProps = data.features[0]?.properties || {}
+    setRouteSummary((prev) => ({
+      ...prev,
+      startName,
+      endName,
+      distanceKm: summaryProps.totalDistance != null ? summaryProps.totalDistance / 1000 : null,
+      durationMin: summaryProps.totalTime != null ? Math.round(summaryProps.totalTime / 60) : null,
+    }))
+
     const dataSource = routeDataSourceRef.current
 
     // 이전에 그려둔 경로선이 있으면 제거
@@ -585,20 +619,114 @@ function App() {
         heading: Cesium.Math.toRadians(0),
         pitch: Cesium.Math.toRadians(-90),   // 경로 전체를 위에서 평면으로 내려다보기
         roll: 0,
-      },  
+      },
     })
-    /*
-    // 출발지와 도착지 사이의 중간거리를 turf로 계산해 경로 탐색 완료 시 카메라 이동
-    const midPoint = turf.midpoint(
-      turf.point(startCoords),
-      turf.point(endCoords)
-    )
 
-    const [ midLon, midLat ] = midPoint.geometry.coordinates
-
-    moveCamera([ midLon, midLat ])
-    */
+    // 경로 주변 건물을 받아와서 그늘 비율/추천 시간 계산 (길찾기 요약 패널용)
+    computeRouteShadowSummary(routeCoords, { west, south, east, north })
   }
+
+  // 경로 주변(bbox) 건물 목록을 백엔드(PostGIS)에서 받아옴
+  async function fetchRouteBuildings(bounds) {
+    const east = bounds.east + 0.002
+    const west = bounds.west - 0.002
+    const south = bounds.south - 0.002
+    const north = bounds.north + 0.002
+    const bbox = west + ',' + south + ',' + east + ',' + north
+
+    const token = localStorage.getItem('token')
+    const response = await fetch('/api/route-buildings?bbox=' + bbox, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+
+    if(!response.ok) {
+      return []
+    }
+
+    const geojson = await response.json()
+    const buildings = []
+
+    console.log('geojson 확인', geojson)
+    for(const feature of geojson.features) {
+      if(feature.geometry.type !== 'Polygon') {
+        continue
+      }
+      
+      // 높이가 없는 건물은 계산 제외
+      const height = feature.properties.height
+      if(height <= 0) {
+        continue
+      }
+
+      const outerRing = feature.geometry.coordinates[0]
+      buildings.push({ outerRing: outerRing, height: height })
+    }
+
+    return buildings
+  }
+
+  // 지금(현재 clock 시각) 기준으로 태양 위치/그늘 비율만 다시 계산 (시간 이동 시마다 호출)
+  function updateRouteShadeForCurrentTime() {
+    // ctx > 경로 계산 컨텍스트(그늘 계산-buildings, samplepoints, midpoint)
+    const ctx = routeContextRef.current
+    if(!ctx) return
+
+    const viewer = cesiumViewerRef.current
+    const currentDate = (viewer && !viewer.isDestroyed())
+      ? Cesium.JulianDate.toDate(viewer.clock.currentTime)
+      : new Date()
+
+    // 태양 위치
+    const sunPos = getSunPosition(currentDate, ctx.midpoint[1], ctx.midpoint[0])
+    // 그림자 비율
+    const shadeRatio = computeShadeRatio(ctx.samplePoints, ctx.buildings, sunPos.altitude, sunPos.azimuth)
+
+    setRouteSummary((prev) => ({
+      ...prev,
+      sunAltitude: sunPos.altitude,
+      sunAzimuth: sunPos.azimuth,
+      shadeRatio,
+    }))
+  } /* updateRouteShadeForCurrentTime */
+
+  // 경로가 새로 그려졌을 때: 건물 받아오고, 현재 그늘 비율 + -9~9시간 중 추천 시간까지 계산
+  async function computeRouteShadowSummary(routeCoords, bboxBounds) {
+    // 3d tiles이기 때문에 좌표에 건물이 있는지 확인x -> 
+    // db에서 폴리곤+높이 데이터를 GeoJson으로 받아와 turf로 계산
+    const buildings = await fetchRouteBuildings(bboxBounds)
+    const samplePoints = sampleRoutePoints(routeCoords, 30)
+    // 현재 해의 위치를 구하기 위함(경로 사이가 거리가 멀것을 대비해 중간지점을 구함)
+    const midpoint = turf.midpoint(
+      turf.point(routeCoords[0]),
+      turf.point(routeCoords[routeCoords.length - 1])
+    ).geometry.coordinates
+
+    // buildings > db에서 받아온 건물 목록
+    // samplePoints: 경로를 30등분한 점
+    // midpoint: 경로 중간 좌표
+    // 경로관련 데이터를 routeContextRef에 저장
+    routeContextRef.current = { buildings, samplePoints, midpoint }
+
+    // 현재 시각 기준 값부터 먼저 반영
+    updateRouteShadeForCurrentTime()
+
+    if(buildings.length === 0) return
+
+    // -9시간 ~ +9시간 중 그늘 비율이 가장 높은(=햇빛이 가장 적은) 시간을 탐색
+    let bestOffset = 0
+    let bestShadeRatio = -1
+    for(let offset = -9; offset <= 9; offset++) {
+      const date = new Date(Date.now() + offset * 60 * 60 * 1000)
+      const sunPos = getSunPosition(date, midpoint[1], midpoint[0])
+      const ratio = computeShadeRatio(samplePoints, buildings, sunPos.altitude, sunPos.azimuth)
+      if(ratio > bestShadeRatio) {
+        bestShadeRatio = ratio
+        bestOffset = offset
+      }
+    }
+
+    setRouteSummary((prev) => ({ ...prev, bestOffset, bestShadeRatio }))
+  } /* computeRouteShadowSummary */
 
   // ai 호출 및 프롬프트 전달
   const handleCallGemini = async (message) => {
@@ -633,6 +761,7 @@ function App() {
     const newDate = new Date(Date.now() + next * 60 * 60 * 1000)
     viewer.clock.currentTime = Cesium.JulianDate.fromDate(newDate)
     updateFnRef.current()
+    updateRouteShadeForCurrentTime()
 }
 
   useEffect(() => {
@@ -659,6 +788,7 @@ function App() {
         animation: false,
         timeline: false,
         fullscreenButton: true,
+        baseLayer: false,
       });
       cesiumViewerRef.current = viewer
 
@@ -693,7 +823,6 @@ function App() {
         style: Cesium.IonWorldImageryStyle.ROAD
       }).then((imageryProvider) => {
         if (viewer.isDestroyed()) return;
-        viewer.imageryLayers.addImageryProvider(imageryProvider);
         imageryLayerRef.current = viewer.imageryLayers.addImageryProvider(imageryProvider);
       });
 
@@ -706,8 +835,8 @@ function App() {
         if(viewer.isDestroyed()) return
         
         const currentDate = Cesium.JulianDate.toDate(viewer.clock.currentTime)
-        const sunPos = getSunPosition(currentDate, 37.480, 126.908)
-        console.log('태양 위치:', sunPos)
+        //const sunPos = getSunPosition(currentDate, 37.480, 126.908)
+        //console.log('태양 위치:', sunPos)
         const cameraHeight = viewer.camera.positionCartographic.height
         
         // 카메라 뷰어의 고도가 더 높으면 뷰어에 있는 객체들을 remove
@@ -769,9 +898,8 @@ function App() {
                 orientation: { heading: Cesium.Math.toRadians(0), pitch: Cesium.Math.toRadians(-90), roll: 0 },
               })
 
-              //const viewer = cesiumViewerRef.current
-                const dataSource = myLocationDataSourceRef.current
-                placeMyLocationMarker(dataSource, longitude, latitude)
+              const dataSource = myLocationDataSourceRef.current
+              placeMyLocationMarker(dataSource, longitude, latitude)
 
             },
             (error) => {
@@ -868,7 +996,14 @@ return (
         style={{ writingMode: 'vertical-lr' }}
       />
 
-
+      <input
+        type="range"
+        min="0"
+        max="360"
+        value={headingDeg}
+        onChange={(e) => handleHeadingChange(Number(e.target.value))}
+        className="sim-heading-slider"
+      />
     </div>
 
     <div className="dashboard-side">
@@ -921,32 +1056,61 @@ return (
 
       <div className="dashboard-stats">
         <h3 className="text-center text-sm font-bold text-[#aa3bff] mb-4 tracking-wide">
-          오늘의 요약
+          길찾기 요약
         </h3>
 
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between rounded-xl border border-[#f0eef5] bg-white px-4 py-3 shadow-sm hover:shadow-md hover:border-[#e4d4fb] transition">
             <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f3eefc] text-[#aa3bff]">☀️</span>
-              <span className="text-sm text-[#4a4550]">태양 고도</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f3eefc] text-[#aa3bff]">🚩</span>
+              <span className="text-sm text-[#4a4550]">
+                {routeSummary?.startName && routeSummary?.endName
+                  ? `${routeSummary.startName} > ${routeSummary.endName}`
+                  : '경로 없음'}
+              </span>
             </div>
-            <span className="text-sm font-semibold text-[#08060d]">-</span>
           </div>
 
           <div className="flex items-center justify-between rounded-xl border border-[#f0eef5] bg-white px-4 py-3 shadow-sm hover:shadow-md hover:border-[#e4d4fb] transition">
             <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f3eefc] text-[#aa3bff]">🧭</span>
-              <span className="text-sm text-[#4a4550]">태양 방위</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f3eefc] text-[#aa3bff]">📏</span>
+              <span className="text-sm text-[#4a4550]">거리</span>
             </div>
-            <span className="text-sm font-semibold text-[#08060d]">-</span>
+            <span className="text-sm font-semibold text-[#08060d]">
+              {routeSummary?.distanceKm != null ? `${routeSummary.distanceKm.toFixed(2)}km` : '-'}
+            </span>
           </div>
 
           <div className="flex items-center justify-between rounded-xl border border-[#f0eef5] bg-white px-4 py-3 shadow-sm hover:shadow-md hover:border-[#e4d4fb] transition">
             <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f3eefc] text-[#aa3bff]">🏢</span>
-              <span className="text-sm text-[#4a4550]">표시 중인 건물 수</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f3eefc] text-[#aa3bff]">🚶</span>
+              <span className="text-sm text-[#4a4550]">소요 시간</span>
             </div>
-            <span className="text-sm font-semibold text-[#08060d]">-</span>
+            <span className="text-sm font-semibold text-[#08060d]">
+              {routeSummary?.durationMin != null ? `${routeSummary.durationMin}분` : '-'}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between rounded-xl border border-[#f0eef5] bg-white px-4 py-3 shadow-sm hover:shadow-md hover:border-[#e4d4fb] transition">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f3eefc] text-[#aa3bff]">🌳</span>
+              <span className="text-sm text-[#4a4550]">경로 그늘 비율</span>
+            </div>
+            <span className="text-sm font-semibold text-[#08060d]">
+              {routeSummary?.shadeRatio != null ? `${routeSummary.shadeRatio}%` : '-'}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between rounded-xl border border-[#f0eef5] bg-white px-4 py-3 shadow-sm hover:shadow-md hover:border-[#e4d4fb] transition">
+            <div className="flex items-center gap-2">
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f3eefc] text-[#aa3bff]">⏱️</span>
+              <span className="text-sm text-[#4a4550]">추천 이동 시간</span>
+            </div>
+            <span className="text-sm font-semibold text-[#08060d]">
+              {routeSummary?.bestOffset != null
+                ? `${routeSummary.bestOffset > 0 ? '+' : ''}${routeSummary.bestOffset}시간 (그늘 ${routeSummary.bestShadeRatio}%)`
+                : '-'}
+            </span>
           </div>
         </div>
       </div>
