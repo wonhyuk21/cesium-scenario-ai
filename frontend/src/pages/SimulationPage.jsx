@@ -11,7 +11,6 @@ import dotIcon from '../assets/blue-dot.svg'
 import startPinIcon from '../assets/start-pin.svg'
 import endPinIcon from '../assets/end-pin.svg'
 
-/* 18 ~ 132 라인 삭제 예정 */
 function parseJwt(token) {
   const base64Payload = token.split('.')[1]
   const decoded = atob(base64Payload.replace(/-/g, '+').replace(/_/g, '/'))
@@ -231,6 +230,7 @@ function App() {
     });
   }
 
+  // 현재 위치를 눌렀을 때 접속 위치를 gps에 맞게 나타내주는 함수
   function placeMyLocationMarker(dataSource, longitude, latitude) {
     // 기존 마커/halo 제거
     if(myLocationMarkerRef.current) dataSource.entities.remove(myLocationMarkerRef.current)
@@ -367,7 +367,7 @@ function App() {
       } else if(parsed < -9 || parsed > 9) {
         setMessages([...newMessages, { role: 'bot', text: `${parsed}시간은 이동 가능 범위(-9~9시간)를 벗어나요. 다시 입력해주세요.`}])
       } else {
-        setTimeOffsetHours(parsed)
+        setTimeOffsetHours(parsed)              // 파싱한 숫자를 가지고 시간 설정
         const viewer = cesiumViewerRef.current
         if(viewer && !viewer.isDestroyed()) {
           const newDate = new Date(Date.now() + parsed * 60 * 60 * 1000)
@@ -776,8 +776,8 @@ function App() {
       console.log('terrainProvider:', terrainProvider)
       
       if(cancelled) return
-
-      viewer = new Cesium.Viewer(viewerRef.current, {
+      
+      viewer = new Cesium.Viewer(viewerRef.current, {   // 지도(뷰어) 생성
         terrainProvider: terrainProvider,
         geocoder: false,
         homeButton: false,
@@ -795,16 +795,17 @@ function App() {
       // 실시간 그림자 설정
       viewer.shadows = true                         // 그림자 기능 켜기
       viewer.scene.globe.enableLighting = true      // 지면이 태양 방향에 따라 밝기를 다르게
+      viewer.clock.shouldAnimate = true
       viewer.shadowMap.maximumDistance = 2000       // 어느 거리까지 그림자를 계산할지
       viewer.shadowMap.size = 4096                  // 해상도
       viewer.shadowMap.softShadows = true           // 경계를 부드럽게
       viewer.shadowMap.darkness = 0.3               // 어둡기
 
-      // 서울시 건물 3D Tiles 로드
+      // 서울시 건물 3D Tiles 로드 -> 3d 건물 api 대신 사용
       Cesium.Cesium3DTileset.fromUrl('/tiles/tileset.json').then((tileset) => {
         if (viewer.isDestroyed()) return
-        tileset.shadows = Cesium.ShadowMode.ENABLED
-        viewer.scene.primitives.add(tileset)
+        tileset.shadows = Cesium.ShadowMode.ENABLED // 불러온 tileset이 그림자를 만들고 받게 설정
+        viewer.scene.primitives.add(tileset)        // 화면에 건물 추가
       })
 
       // gps핀 전용 CustomDataSource
@@ -910,7 +911,7 @@ function App() {
         } /* flyToInitialLocation() */
 
         zoomFnRef.current = updateZoomLevel
-        viewer.camera.percentageChanged = 0.1
+        viewer.camera.percentageChanged = 0.5
         viewer.camera.changed.addEventListener(updateZoomLevel)
         updateZoomLevel()
         
